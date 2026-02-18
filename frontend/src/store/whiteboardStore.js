@@ -35,6 +35,8 @@ export const useWhiteboardStore = create((set, get) => ({
 
   // Realtime channel
   _channel: null,
+  _userId: null,
+  _userName: null,
   connected: false,
 
   // Actions
@@ -145,13 +147,13 @@ export const useWhiteboardStore = create((set, get) => ({
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          set({ connected: true });
-          // Track presence
+          // Track presence and cache user info for cursor broadcasts
           const { data: { session } } = await supabase.auth.getSession();
           const userId = session?.user?.id || `anon_${Math.random().toString(36).slice(2, 8)}`;
           const userName = session?.user?.user_metadata?.display_name || 'Guest';
           const colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c'];
           const color = colors[Math.floor(Math.random() * colors.length)];
+          set({ connected: true, _userId: userId, _userName: userName });
           channel.track({ userId, userName, color });
         }
         if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
@@ -244,12 +246,12 @@ export const useWhiteboardStore = create((set, get) => ({
   setSelectedObjects: (ids) => set({ selectedObjectIds: ids }),
 
   updateCursor: (position) => {
-    const { _channel } = get();
+    const { _channel, _userId, _userName } = get();
     if (!_channel) return;
     _channel.send({
       type: 'broadcast',
       event: 'cursor_move',
-      payload: position,
+      payload: { userId: _userId, userName: _userName, x: position.x, y: position.y },
     });
   },
 
@@ -272,7 +274,8 @@ export const useWhiteboardStore = create((set, get) => ({
         throw new Error('You must be signed in to use AI commands');
       }
 
-      const res = await fetch('/api/ai', {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
+      const res = await fetch(`${backendUrl}/api/ai`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

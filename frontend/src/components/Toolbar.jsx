@@ -68,8 +68,10 @@ export default function Toolbar() {
                     : 'bg-white text-gray-700 hover:bg-gray-50'
                 }`}
                 title={t.label}
+                aria-label={`${t.label} tool`}
+                aria-pressed={tool === t.id}
               >
-                <Icon className="w-5 h-5" />
+                <Icon className="w-5 h-5" aria-hidden="true" />
               </button>
             );
           })}
@@ -85,8 +87,9 @@ export default function Toolbar() {
                 : 'bg-gray-200 text-gray-400 cursor-not-allowed'
             }`}
             title="Delete selected"
+            aria-label="Delete selected objects"
           >
-            <Trash2 className="w-5 h-5" />
+            <Trash2 className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -127,8 +130,9 @@ export default function Toolbar() {
                   onClick={logout}
                   className="flex items-center gap-2 px-3 py-1 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
                   title="Sign out"
+                  aria-label="Sign out"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <LogOut className="w-4 h-4" aria-hidden="true" />
                   <span>Sign Out</span>
                 </button>
               </>

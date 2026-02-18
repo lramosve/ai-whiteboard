@@ -40,6 +40,8 @@ export default function AIPanel() {
         onClick={() => setIsOpen(!isOpen)}
         className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center z-50"
         title="AI Assistant"
+        aria-label={isOpen ? 'Close AI Assistant' : 'Open AI Assistant'}
+        aria-expanded={isOpen}
       >
         {aiProcessing ? (
           <Loader2 className="w-6 h-6 animate-spin" />

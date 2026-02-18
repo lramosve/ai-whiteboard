@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Mail, Lock, User, AlertCircle } from 'lucide-react';
 
@@ -9,8 +9,43 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const modalRef = useRef(null);
 
   const { signin, signup, signInWithGoogle } = useAuth();
+
+  // Focus trap and escape-to-close
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+
+      if (e.key === 'Tab' && modalRef.current) {
+        const focusable = modalRef.current.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    // Focus the modal on open
+    modalRef.current?.focus();
+
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -28,17 +63,7 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
       onClose();
     } catch (err) {
       console.error('Auth error:', err);
-      setError(
-        err.code === 'auth/email-already-in-use'
-          ? 'Email already in use'
-          : err.code === 'auth/invalid-email'
-          ? 'Invalid email address'
-          : err.code === 'auth/weak-password'
-          ? 'Password must be at least 6 characters'
-          : err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password'
-          ? 'Invalid email or password'
-          : 'Authentication failed. Please try again.'
-      );
+      setError(err.message || 'Authentication failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -53,15 +78,32 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
       onClose();
     } catch (err) {
       console.error('Google sign-in error:', err);
-      setError('Google sign-in failed. Please try again.');
+      setError(err.message || 'Google sign-in failed. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      role="dialog"
+      aria-modal="true"
+      aria-label={mode === 'signup' ? 'Create Account' : 'Sign In'}
+    >
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 outline-none"
+      >
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+          aria-label="Close dialog"
+        >
+          ✕
+        </button>
+
         <h2 className="text-3xl font-bold text-gray-800 mb-2">
           {mode === 'signup' ? 'Create Account' : 'Welcome Back'}
         </h2>
@@ -72,7 +114,7 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
         </p>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2" role="alert">
             <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
             <p className="text-sm text-red-800">{error}</p>
           </div>
@@ -81,12 +123,13 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'signup' && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="displayName" className="block text-sm font-medium text-gray-700 mb-2">
                 Display Name
               </label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" aria-hidden="true" />
                 <input
+                  id="displayName"
                   type="text"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
@@ -99,12 +142,13 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
               Email
             </label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" aria-hidden="true" />
               <input
+                id="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -116,12 +160,13 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
               Password
             </label>
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" aria-hidden="true" />
               <input
+                id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -162,7 +207,7 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
           disabled={loading}
           className="w-full flex items-center justify-center gap-3 bg-white border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <svg className="w-5 h-5" viewBox="0 0 24 24">
+          <svg className="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
             <path
               fill="#4285F4"
               d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -196,13 +241,6 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
               : "Don't have an account? Sign up"}
           </button>
         </div>
-
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
-        >
-          ✕
-        </button>
       </div>
     </div>
   );

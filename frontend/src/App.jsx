@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import ErrorBoundary from './components/ErrorBoundary';
 import WhiteboardCanvas from './components/WhiteboardCanvas';
 import Toolbar from './components/Toolbar';
 import AIPanel from './components/AIPanel';
@@ -10,19 +11,24 @@ function AppContent() {
   const joinBoard = useWhiteboardStore((state) => state.joinBoard);
   const leaveBoard = useWhiteboardStore((state) => state.leaveBoard);
   const { user } = useAuth();
+  const boardIdRef = useRef(null);
 
+  // Board initialization - runs when user changes but skips if already on a board
   useEffect(() => {
     const initBoard = async () => {
+      if (boardIdRef.current) return;
+
       const params = new URLSearchParams(window.location.search);
       let boardId = params.get('board');
 
       if (!boardId) {
-        // Create a board for any user (authenticated or anonymous)
+        if (!user) return; // Need auth to create a board
+
         const { data, error } = await supabase
           .from('boards')
           .insert({
             name: 'Untitled Board',
-            owner_id: user?.id || null,
+            owner_id: user.id,
             is_public: true
           })
           .select()
@@ -30,29 +36,34 @@ function AppContent() {
 
         if (!error && data) {
           boardId = data.id;
+          window.history.replaceState({}, '', `?board=${boardId}`);
         } else {
-          // Fallback: use a random UUID (objects won't persist without a board row)
-          boardId = crypto.randomUUID();
+          console.error('Failed to create board:', error);
+          return;
         }
-
-        window.history.replaceState({}, '', `?board=${boardId}`);
       }
 
+      boardIdRef.current = boardId;
       await joinBoard(boardId);
     };
 
     initBoard();
+  }, [user, joinBoard]);
 
+  // Cleanup on unmount only
+  useEffect(() => {
     return () => {
       leaveBoard();
     };
-  }, [user, joinBoard, leaveBoard]);
+  }, [leaveBoard]);
 
   return (
     <div className="w-screen h-screen overflow-hidden bg-gray-100">
       <Toolbar />
       <div className="pt-[72px] h-full">
-        <WhiteboardCanvas />
+        <ErrorBoundary>
+          <WhiteboardCanvas />
+        </ErrorBoundary>
       </div>
       <AIPanel />
     </div>
@@ -61,9 +72,11 @@ function AppContent() {
 
 function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 

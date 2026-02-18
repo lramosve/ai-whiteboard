@@ -1,15 +1,17 @@
-import React, { useRef, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import { Stage, Layer, Rect, Circle, Text, Arrow, Line, Group } from 'react-konva';
 import { useWhiteboardStore } from '../store/whiteboardStore';
 
-const CANVAS_WIDTH = 3000;
-const CANVAS_HEIGHT = 2000;
+const TOOLBAR_HEIGHT = 72;
+const ZOOM_SCALE_BY = 1.05;
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 5;
 
 export default function WhiteboardCanvas() {
   const stageRef = useRef(null);
   const [viewportSize, setViewportSize] = useState({
     width: window.innerWidth,
-    height: window.innerHeight - 120 // Account for toolbar
+    height: window.innerHeight - TOOLBAR_HEIGHT
   });
 
   const {
@@ -28,8 +30,57 @@ export default function WhiteboardCanvas() {
   const [newObject, setNewObject] = useState(null);
   const lastCursorSendRef = useRef(0);
 
+  // Pan/zoom state
+  const [stageScale, setStageScale] = useState(1);
+  const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
+
+  // Inline text input state
+  const [textInputPos, setTextInputPos] = useState(null);
+  const [textInputValue, setTextInputValue] = useState('');
+  const textInputRef = useRef(null);
+
+  // Convert viewport pointer position to world coordinates
+  const getWorldPos = useCallback((stage) => {
+    const pointer = stage.getPointerPosition();
+    return {
+      x: (pointer.x - stagePos.x) / stageScale,
+      y: (pointer.y - stagePos.y) / stageScale,
+    };
+  }, [stagePos, stageScale]);
+
+  // Handle scroll-to-zoom
+  const handleWheel = useCallback((e) => {
+    e.evt.preventDefault();
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const oldScale = stageScale;
+    const pointer = stage.getPointerPosition();
+    const newScale = e.evt.deltaY > 0
+      ? oldScale / ZOOM_SCALE_BY
+      : oldScale * ZOOM_SCALE_BY;
+    const clampedScale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newScale));
+
+    const mousePointTo = {
+      x: (pointer.x - stagePos.x) / oldScale,
+      y: (pointer.y - stagePos.y) / oldScale,
+    };
+    const newPos = {
+      x: pointer.x - mousePointTo.x * clampedScale,
+      y: pointer.y - mousePointTo.y * clampedScale,
+    };
+
+    setStageScale(clampedScale);
+    setStagePos(newPos);
+  }, [stageScale, stagePos]);
+
   // Handle mouse down
   const handleMouseDown = useCallback((e) => {
+    // Close text input if clicking elsewhere
+    if (textInputPos && tool !== 'text') {
+      commitTextInput();
+    }
+
     if (tool === 'select') {
       const clickedOnEmpty = e.target === e.target.getStage();
       if (clickedOnEmpty) {
@@ -38,7 +89,8 @@ export default function WhiteboardCanvas() {
       return;
     }
 
-    const pos = e.target.getStage().getPointerPosition();
+    const stage = e.target.getStage();
+    const pos = getWorldPos(stage);
     setIsDrawing(true);
 
     switch (tool) {
@@ -69,20 +121,21 @@ export default function WhiteboardCanvas() {
         });
         break;
 
-      case 'text':
-        const text = prompt('Enter text:');
-        if (text) {
-          addObject({
-            type: 'text',
-            position: { x: pos.x, y: pos.y },
-            properties: {
-              text,
-              fontSize: 20,
-              fill: '#2c3e50'
-            }
+      case 'text': {
+        // Show inline text input at click position
+        const stageContainer = stageRef.current?.container().getBoundingClientRect();
+        if (stageContainer) {
+          setTextInputPos({
+            worldX: pos.x,
+            worldY: pos.y,
+            screenX: e.evt.clientX - stageContainer.left,
+            screenY: e.evt.clientY - stageContainer.top,
           });
+          setTextInputValue('');
+          setTimeout(() => textInputRef.current?.focus(), 0);
         }
         break;
+      }
 
       case 'arrow':
         setNewObject({
@@ -98,11 +151,29 @@ export default function WhiteboardCanvas() {
         });
         break;
     }
-  }, [tool, addObject, setSelectedObjects]);
+  }, [tool, getWorldPos, setSelectedObjects, textInputPos]);
+
+  // Commit inline text input
+  const commitTextInput = useCallback(() => {
+    if (textInputPos && textInputValue.trim()) {
+      addObject({
+        type: 'text',
+        position: { x: textInputPos.worldX, y: textInputPos.worldY },
+        properties: {
+          text: textInputValue.trim(),
+          fontSize: 20,
+          fill: '#2c3e50'
+        }
+      });
+    }
+    setTextInputPos(null);
+    setTextInputValue('');
+  }, [textInputPos, textInputValue, addObject]);
 
   // Handle mouse move
   const handleMouseMove = useCallback((e) => {
-    const pos = e.target.getStage().getPointerPosition();
+    const stage = e.target.getStage();
+    const pos = getWorldPos(stage);
 
     // Throttled cursor position broadcast (50ms)
     const now = Date.now();
@@ -128,7 +199,7 @@ export default function WhiteboardCanvas() {
         });
         break;
 
-      case 'circle':
+      case 'circle': {
         const radius = Math.sqrt(
           Math.pow(pos.x - startX, 2) + Math.pow(pos.y - startY, 2)
         );
@@ -140,6 +211,7 @@ export default function WhiteboardCanvas() {
           }
         });
         break;
+      }
 
       case 'arrow':
         setNewObject({
@@ -151,13 +223,13 @@ export default function WhiteboardCanvas() {
         });
         break;
     }
-  }, [isDrawing, newObject, updateCursor]);
+  }, [isDrawing, newObject, updateCursor, getWorldPos]);
 
   // Handle mouse up
   const handleMouseUp = useCallback(() => {
     if (isDrawing && newObject) {
       // Only add if object has meaningful size
-      const isValid = newObject.type === 'rectangle' 
+      const isValid = newObject.type === 'rectangle'
         ? Math.abs(newObject.properties.width) > 5 && Math.abs(newObject.properties.height) > 5
         : newObject.type === 'circle'
         ? newObject.properties.radius > 5
@@ -171,6 +243,13 @@ export default function WhiteboardCanvas() {
     setIsDrawing(false);
     setNewObject(null);
   }, [isDrawing, newObject, addObject]);
+
+  // Handle stage drag end (panning)
+  const handleStageDragEnd = useCallback((e) => {
+    if (e.target === e.target.getStage()) {
+      setStagePos({ x: e.target.x(), y: e.target.y() });
+    }
+  }, []);
 
   // Render object based on type
   const renderObject = (obj, index) => {
@@ -310,13 +389,11 @@ export default function WhiteboardCanvas() {
       }
 
       case 'connector': {
-        // Look up source and target object positions to draw the line
         const fromObj = objects.find(o => o.id === obj.properties.fromId);
         const toObj = objects.find(o => o.id === obj.properties.toId);
         if (!fromObj || !toObj) return null;
         const fromPos = fromObj.position || { x: 0, y: 0 };
         const toPos = toObj.position || { x: 0, y: 0 };
-        // Center offset: try to use width/height if available
         const fromCx = fromPos.x + ((fromObj.properties.width || 0) / 2);
         const fromCy = fromPos.y + ((fromObj.properties.height || 0) / 2);
         const toCx = toPos.x + ((toObj.properties.width || 0) / 2);
@@ -370,7 +447,7 @@ export default function WhiteboardCanvas() {
     const handleResize = () => {
       setViewportSize({
         width: window.innerWidth,
-        height: window.innerHeight - 120
+        height: window.innerHeight - TOOLBAR_HEIGHT
       });
     };
 
@@ -379,27 +456,68 @@ export default function WhiteboardCanvas() {
   }, []);
 
   return (
-    <div style={{ overflow: 'auto', width: '100%', height: '100%' }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <Stage
         ref={stageRef}
         width={viewportSize.width}
         height={viewportSize.height}
+        draggable={tool === 'select'}
+        scaleX={stageScale}
+        scaleY={stageScale}
+        x={stagePos.x}
+        y={stagePos.y}
+        onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onDragEnd={handleStageDragEnd}
         style={{ background: '#f8f9fa' }}
       >
         <Layer>
           {/* Render existing objects */}
           {objects.map((obj, index) => renderObject(obj, index))}
-          
+
           {/* Render object being drawn */}
           {newObject && renderObject(newObject, 'new')}
-          
+
           {/* Render collaborative cursors */}
           {renderCursors()}
         </Layer>
       </Stage>
+
+      {/* Zoom indicator */}
+      {stageScale !== 1 && (
+        <div className="absolute bottom-4 left-4 bg-white bg-opacity-80 px-3 py-1 rounded-full text-sm text-gray-600 shadow-sm">
+          {Math.round(stageScale * 100)}%
+        </div>
+      )}
+
+      {/* Inline text input overlay */}
+      {textInputPos && (
+        <input
+          ref={textInputRef}
+          type="text"
+          value={textInputValue}
+          onChange={(e) => setTextInputValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              commitTextInput();
+            } else if (e.key === 'Escape') {
+              setTextInputPos(null);
+              setTextInputValue('');
+            }
+          }}
+          onBlur={commitTextInput}
+          placeholder="Type text..."
+          className="absolute border-2 border-purple-500 rounded px-2 py-1 text-base outline-none bg-white shadow-md"
+          style={{
+            left: textInputPos.screenX,
+            top: textInputPos.screenY,
+            minWidth: 150,
+            zIndex: 10,
+          }}
+        />
+      )}
     </div>
   );
 }
