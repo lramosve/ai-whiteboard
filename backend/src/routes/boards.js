@@ -32,45 +32,10 @@ router.post('/', authenticate, asyncHandler(async (req, res) => {
 router.get('/', authenticate, asyncHandler(async (req, res) => {
   const userId = req.user.uid;
 
-  // Get boards owned by user
-  const ownedBoards = await supabaseConfig.db
-    .collection('boards')
-    .where('ownerId', '==', userId)
-    .orderBy('updatedAt', 'desc')
-    .get();
+  const owned = await supabaseConfig.getBoardsByOwner(userId);
+  const shared = await supabaseConfig.getBoardsByCollaborator(userId);
 
-  // Get boards where user is a collaborator
-  const collabSnapshot = await supabaseConfig.db
-    .collection('boardCollaborators')
-    .where('userId', '==', userId)
-    .get();
-
-  const collabBoardIds = collabSnapshot.docs.map(doc => doc.data().boardId);
-  
-  let sharedBoards = [];
-  if (collabBoardIds.length > 0) {
-    const sharedSnapshot = await supabaseConfig.db
-      .collection('boards')
-      .where(supabaseConfig.db.FieldPath.documentId(), 'in', collabBoardIds)
-      .get();
-    
-    sharedBoards = sharedSnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      role: 'collaborator',
-    }));
-  }
-
-  const owned = ownedBoards.docs.map(doc => ({
-    id: doc.id,
-    ...doc.data(),
-    role: 'owner',
-  }));
-
-  res.json({
-    owned,
-    shared: sharedBoards,
-  });
+  res.json({ owned, shared });
 }));
 
 /**

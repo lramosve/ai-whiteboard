@@ -53,8 +53,8 @@ export const logger = winston.createLogger({
   ]
 });
 
-// Don't write logs to files in production on Cloud Run (use stdout)
-if (process.env.NODE_ENV === 'production' && process.env.K_SERVICE) {
+// Use stdout-only in production (cloud platforms have ephemeral filesystems)
+if (process.env.NODE_ENV === 'production') {
   logger.clear();
   logger.add(new winston.transports.Console({
     format: combine(

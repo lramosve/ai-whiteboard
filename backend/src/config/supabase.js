@@ -152,6 +152,30 @@ class SupabaseConfig {
     if (error) throw error;
   }
 
+  async getBoardsByOwner(userId) {
+    const { data, error } = await this.adminClient
+      .from('boards')
+      .select('*')
+      .eq('owner_id', userId)
+      .order('updated_at', { ascending: false });
+
+    if (error) throw error;
+    return data.map(b => ({ ...this.mapBoard(b), role: 'owner' }));
+  }
+
+  async getBoardsByCollaborator(userId) {
+    const { data, error } = await this.adminClient
+      .from('board_collaborators')
+      .select('board_id, role, boards(*)')
+      .eq('user_id', userId);
+
+    if (error) throw error;
+    return data.map(row => ({
+      ...this.mapBoard(row.boards),
+      role: row.role || 'collaborator',
+    }));
+  }
+
   // Collaborator operations
   async addCollaborator(boardId, userId, role = 'editor') {
     const { data, error } = await this.adminClient

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useCallback, useMemo } from 'react';
-import { Stage, Layer, Rect, Circle, Text, Arrow, Line } from 'react-konva';
+import { Stage, Layer, Rect, Circle, Text, Arrow, Line, Group } from 'react-konva';
 import { useWhiteboardStore } from '../store/whiteboardStore';
 
 const CANVAS_WIDTH = 3000;
@@ -247,6 +247,91 @@ export default function WhiteboardCanvas() {
             pointerWidth={obj.properties.pointerWidth}
           />
         );
+
+      case 'sticky_note': {
+        const noteWidth = obj.properties.width || 200;
+        const noteHeight = obj.properties.height || 200;
+        return (
+          <Group {...commonProps} x={position.x} y={position.y}>
+            <Rect
+              width={noteWidth}
+              height={noteHeight}
+              fill={obj.properties.color || '#FFFACD'}
+              stroke={isSelected ? '#f39c12' : '#d4c95c'}
+              strokeWidth={isSelected ? 3 : 1}
+              shadowColor="rgba(0,0,0,0.15)"
+              shadowBlur={8}
+              shadowOffsetX={2}
+              shadowOffsetY={2}
+              cornerRadius={4}
+            />
+            <Text
+              x={12}
+              y={12}
+              width={noteWidth - 24}
+              height={noteHeight - 24}
+              text={obj.properties.text}
+              fontSize={obj.properties.fontSize || 16}
+              fontFamily="Arial"
+              fill="#333"
+              wrap="word"
+              listening={false}
+            />
+          </Group>
+        );
+      }
+
+      case 'frame': {
+        const frameWidth = obj.properties.width || 400;
+        const frameHeight = obj.properties.height || 300;
+        return (
+          <Group {...commonProps} x={position.x} y={position.y}>
+            <Rect
+              width={frameWidth}
+              height={frameHeight}
+              fill={obj.properties.fill || 'rgba(0,0,0,0.02)'}
+              stroke={isSelected ? '#f39c12' : (obj.properties.stroke || '#95a5a6')}
+              strokeWidth={isSelected ? 3 : (obj.properties.strokeWidth || 2)}
+              dash={[8, 4]}
+              cornerRadius={8}
+            />
+            <Text
+              x={10}
+              y={-22}
+              text={obj.properties.title || 'Frame'}
+              fontSize={14}
+              fontFamily="Arial"
+              fontStyle="bold"
+              fill={obj.properties.stroke || '#95a5a6'}
+              listening={false}
+            />
+          </Group>
+        );
+      }
+
+      case 'connector': {
+        // Look up source and target object positions to draw the line
+        const fromObj = objects.find(o => o.id === obj.properties.fromId);
+        const toObj = objects.find(o => o.id === obj.properties.toId);
+        if (!fromObj || !toObj) return null;
+        const fromPos = fromObj.position || { x: 0, y: 0 };
+        const toPos = toObj.position || { x: 0, y: 0 };
+        // Center offset: try to use width/height if available
+        const fromCx = fromPos.x + ((fromObj.properties.width || 0) / 2);
+        const fromCy = fromPos.y + ((fromObj.properties.height || 0) / 2);
+        const toCx = toPos.x + ((toObj.properties.width || 0) / 2);
+        const toCy = toPos.y + ((toObj.properties.height || 0) / 2);
+        return (
+          <Line
+            key={obj.id || `temp-${index}`}
+            points={[fromCx, fromCy, toCx, toCy]}
+            stroke={isSelected ? '#f39c12' : (obj.properties.stroke || '#7f8c8d')}
+            strokeWidth={isSelected ? 3 : (obj.properties.strokeWidth || 2)}
+            dash={obj.properties.dash && obj.properties.dash.length > 0 ? obj.properties.dash : undefined}
+            listening={false}
+          />
+        );
+      }
 
       default:
         return null;
