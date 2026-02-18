@@ -1,0 +1,16 @@
+AI Whiteboard Setup Information (Supabase Edition)
+Generated: 02/17/2026 20:00:49
+
+Supabase Project URL: https://mjosldnjitwduxyjiunt.supabase.co
+Backend Port: 8080
+Frontend URL: http://localhost:3000
+
+Start Commands:
+  Backend:  start-backend.bat  (or: cd backend && npm run dev)
+  Frontend: start-frontend.bat (or: cd frontend && npm run dev)
+
+Supabase Dashboard: https://app.supabase.com
+
+For help, see:
+  - WINDOWS_SETUP_SUPABASE.md
+  - SUPABASE_SETUP.md

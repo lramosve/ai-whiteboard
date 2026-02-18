@@ -1,0 +1,24 @@
+{
+  "name": "whiteboard-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for AI Whiteboard control",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "whiteboard-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.5.0",
+    "socket.io-client": "^4.6.1",
+    "dotenv": "^16.4.5"
+  },
+  "keywords": [
+    "mcp",
+    "whiteboard",
+    "ai",
+    "collaboration"
+  ]
+}
