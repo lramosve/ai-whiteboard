@@ -17,20 +17,21 @@ function AppContent() {
       let boardId = params.get('board');
 
       if (!boardId) {
-        if (user) {
-          // Create a real board for authenticated users
-          const { data, error } = await supabase
-            .from('boards')
-            .insert({ name: 'Untitled Board', owner_id: user.id, is_public: true })
-            .select()
-            .single();
+        // Create a board for any user (authenticated or anonymous)
+        const { data, error } = await supabase
+          .from('boards')
+          .insert({
+            name: 'Untitled Board',
+            owner_id: user?.id || null,
+            is_public: true
+          })
+          .select()
+          .single();
 
-          if (!error && data) {
-            boardId = data.id;
-          }
-        }
-
-        if (!boardId) {
+        if (!error && data) {
+          boardId = data.id;
+        } else {
+          // Fallback: use a random UUID (objects won't persist without a board row)
           boardId = crypto.randomUUID();
         }
 
