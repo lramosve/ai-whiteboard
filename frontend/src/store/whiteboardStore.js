@@ -246,8 +246,8 @@ export const useWhiteboardStore = create((set, get) => ({
   setSelectedObjects: (ids) => set({ selectedObjectIds: ids }),
 
   updateCursor: (position) => {
-    const { _channel, _userId, _userName } = get();
-    if (!_channel) return;
+    const { _channel, _userId, _userName, connected } = get();
+    if (!_channel || !connected) return;
     _channel.send({
       type: 'broadcast',
       event: 'cursor_move',

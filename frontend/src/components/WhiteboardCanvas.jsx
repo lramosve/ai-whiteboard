@@ -130,6 +130,7 @@ export default function WhiteboardCanvas() {
   const [newObject, setNewObject] = useState(null);
   const [selectionBox, setSelectionBox] = useState(null);
   const clipboardRef = useRef([]);
+  const dragStartPositionsRef = useRef({});
   const lastCursorSendRef = useRef(0);
 
   // Pan/zoom state
@@ -798,10 +799,51 @@ export default function WhiteboardCanvas() {
           }
         }
       },
+      onDragStart: (e) => {
+        if (selectedObjectIds.length > 1 && selectedObjectIds.includes(obj.id)) {
+          const layer = layerRef.current;
+          const positions = {};
+          selectedObjectIds.forEach(id => {
+            const node = layer?.findOne('#' + id);
+            if (node) positions[id] = { x: node.x(), y: node.y() };
+          });
+          dragStartPositionsRef.current = positions;
+        }
+      },
+      onDragMove: (e) => {
+        if (selectedObjectIds.length > 1 && selectedObjectIds.includes(obj.id)) {
+          const layer = layerRef.current;
+          const startPos = dragStartPositionsRef.current[obj.id];
+          if (!startPos) return;
+          const dx = e.target.x() - startPos.x;
+          const dy = e.target.y() - startPos.y;
+          selectedObjectIds.forEach(id => {
+            if (id !== obj.id) {
+              const node = layer?.findOne('#' + id);
+              const sp = dragStartPositionsRef.current[id];
+              if (node && sp) {
+                node.x(sp.x + dx);
+                node.y(sp.y + dy);
+              }
+            }
+          });
+        }
+      },
       onDragEnd: (e) => {
-        updateObject(obj.id, {
-          position: { x: e.target.x(), y: e.target.y() }
-        });
+        if (selectedObjectIds.length > 1 && selectedObjectIds.includes(obj.id)) {
+          const layer = layerRef.current;
+          selectedObjectIds.forEach(id => {
+            const node = layer?.findOne('#' + id);
+            if (node) {
+              updateObject(id, { position: { x: node.x(), y: node.y() } });
+            }
+          });
+          dragStartPositionsRef.current = {};
+        } else {
+          updateObject(obj.id, {
+            position: { x: e.target.x(), y: e.target.y() }
+          });
+        }
       },
       onTransformEnd: handleTransformEnd,
     };
@@ -994,38 +1036,38 @@ export default function WhiteboardCanvas() {
   const renderCursors = () => {
     return Object.entries(cursors).map(([userId, cursor]) => {
       const user = users[userId];
-      if (!user) return null;
-      const name = cursor.userName || user.name || 'Guest';
+      const name = cursor.userName || user?.name || 'Guest';
+      const color = user?.color || '#666';
+      const labelWidth = name.length * 7 + 14;
 
       return (
         <Group key={userId} x={cursor.x} y={cursor.y} listening={false}>
-          {/* Cursor arrow */}
+          {/* Cursor pointer triangle */}
           <Line
-            points={[0, 0, 0, 14, 4, 11, 8, 18, 11, 17, 7, 10, 12, 10]}
-            fill={user.color}
-            stroke="#fff"
-            strokeWidth={1}
+            points={[0, 0, 4, 14, 10, 10]}
+            fill={color}
+            stroke="#ffffff"
+            strokeWidth={1.5}
             closed={true}
+            lineJoin="round"
           />
-          {/* Name badge */}
+          {/* Name label badge */}
           <Rect
-            x={12}
-            y={14}
-            width={name.length * 7 + 12}
+            x={10}
+            y={12}
+            width={labelWidth}
             height={20}
-            fill={user.color}
+            fill={color}
             cornerRadius={4}
-            shadowColor="rgba(0,0,0,0.2)"
-            shadowBlur={3}
-            shadowOffsetY={1}
           />
           <Text
-            x={18}
-            y={17}
+            x={17}
+            y={15}
             text={name}
-            fontSize={12}
+            fontSize={11}
             fontFamily="Arial"
-            fill="#fff"
+            fontStyle="bold"
+            fill="#ffffff"
           />
         </Group>
       );

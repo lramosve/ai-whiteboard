@@ -41,10 +41,15 @@ export default function Minimap({ objects, stageScale, stagePos, viewportSize, o
       switch (type) {
         case 'rectangle':
         case 'frame':
-        case 'sticky_note':
-          right = pos.x + (obj.properties.width || 200);
-          bottom = pos.y + (obj.properties.height || 200);
+        case 'sticky_note': {
+          const w = Math.abs(obj.properties.width || 200);
+          const h = Math.abs(obj.properties.height || 200);
+          left = Math.min(pos.x, pos.x + (obj.properties.width || 200));
+          top = Math.min(pos.y, pos.y + (obj.properties.height || 200));
+          right = left + w;
+          bottom = top + h;
           break;
+        }
         case 'circle':
           left = pos.x - (obj.properties.radius || 50);
           top = pos.y - (obj.properties.radius || 50);
@@ -164,28 +169,36 @@ export default function Minimap({ objects, stageScale, stagePos, viewportSize, o
       const color = TYPE_COLORS[type] || '#999';
       ctx.fillStyle = color;
 
-      const x = (pos.x - bounds.minX) * scale + offsetX;
-      const y = (pos.y - bounds.minY) * scale + offsetY;
-
       switch (type) {
         case 'rectangle':
         case 'frame':
         case 'sticky_note': {
-          const w = Math.max(3, (obj.properties.width || 200) * scale);
-          const h = Math.max(3, (obj.properties.height || 200) * scale);
-          ctx.fillRect(x, y, w, h);
+          const rawW = obj.properties.width || 200;
+          const rawH = obj.properties.height || 200;
+          const objX = Math.min(pos.x, pos.x + rawW);
+          const objY = Math.min(pos.y, pos.y + rawH);
+          const w = Math.max(4, Math.abs(rawW) * scale);
+          const h = Math.max(4, Math.abs(rawH) * scale);
+          const drawX = (objX - bounds.minX) * scale + offsetX;
+          const drawY = (objY - bounds.minY) * scale + offsetY;
+          ctx.fillRect(drawX, drawY, w, h);
           break;
         }
         case 'circle': {
+          const cx = (pos.x - bounds.minX) * scale + offsetX;
+          const cy = (pos.y - bounds.minY) * scale + offsetY;
           const r = Math.max(2, (obj.properties.radius || 50) * scale);
           ctx.beginPath();
-          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
           ctx.fill();
           break;
         }
-        case 'text':
-          ctx.fillRect(x, y, Math.max(3, 60 * scale), Math.max(2, 14 * scale));
+        case 'text': {
+          const tx = (pos.x - bounds.minX) * scale + offsetX;
+          const ty = (pos.y - bounds.minY) * scale + offsetY;
+          ctx.fillRect(tx, ty, Math.max(3, 60 * scale), Math.max(2, 14 * scale));
           break;
+        }
         case 'arrow': {
           const pts = obj.properties.points || [];
           if (pts.length >= 4) {
