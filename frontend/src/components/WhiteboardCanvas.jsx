@@ -50,6 +50,13 @@ export default function WhiteboardCanvas() {
   const [editingStickyNote, setEditingStickyNote] = useState(null); // { id, x, y, width, height, text }
   const [stickyNoteText, setStickyNoteText] = useState('');
   const stickyNoteInputRef = useRef(null);
+  // Refs to access latest sticky note state in commit (avoids stale closures)
+  const editingStickyNoteRef = useRef(null);
+  const stickyNoteTextRef = useRef('');
+
+  // Keep refs in sync with state
+  useEffect(() => { editingStickyNoteRef.current = editingStickyNote; }, [editingStickyNote]);
+  useEffect(() => { stickyNoteTextRef.current = stickyNoteText; }, [stickyNoteText]);
 
   // Space key handling for pan mode
   useEffect(() => {
@@ -127,6 +134,11 @@ export default function WhiteboardCanvas() {
   const handleMouseDown = useCallback((e) => {
     const stage = e.target.getStage();
     const pointer = stage.getPointerPosition();
+
+    // Commit any pending sticky note before processing new click
+    if (editingStickyNoteRef.current) {
+      commitStickyNote();
+    }
 
     // Middle mouse button or space held = start panning
     if (e.evt.button === 1 || isSpaceHeld) {
@@ -239,7 +251,7 @@ export default function WhiteboardCanvas() {
         });
         break;
     }
-  }, [tool, getWorldPos, setSelectedObjects, textInputPos, isSpaceHeld, stagePos, stageScale]);
+  }, [tool, getWorldPos, setSelectedObjects, textInputPos, isSpaceHeld, stagePos, stageScale, commitStickyNote]);
 
   // Commit inline text input
   const commitTextInput = useCallback(() => {
@@ -258,39 +270,43 @@ export default function WhiteboardCanvas() {
     setTextInputValue('');
   }, [textInputPos, textInputValue, addObject]);
 
-  // Commit sticky note (create or update)
+  // Commit sticky note (create or update) - uses refs for reliable access
   const commitStickyNote = useCallback(() => {
-    if (!editingStickyNote) return;
-    const text = stickyNoteText.trim();
-    if (editingStickyNote.id) {
-      // Editing existing sticky note
-      if (text) {
-        updateObject(editingStickyNote.id, {
-          properties: {
-            ...editingStickyNote.properties,
-            text,
-          }
-        });
-      }
-    } else {
-      // Creating new sticky note
-      if (text) {
-        addObject({
-          type: 'sticky_note',
-          position: { x: editingStickyNote.worldX, y: editingStickyNote.worldY },
-          properties: {
-            text,
-            color: '#FFFACD',
-            width: editingStickyNote.width,
-            height: editingStickyNote.height,
-            fontSize: 16,
-          }
-        });
-      }
-    }
+    const note = editingStickyNoteRef.current;
+    const text = (stickyNoteTextRef.current || '').trim();
+    if (!note) return;
+
+    // Clear state immediately to prevent double-commit
+    editingStickyNoteRef.current = null;
+    stickyNoteTextRef.current = '';
     setEditingStickyNote(null);
     setStickyNoteText('');
-  }, [editingStickyNote, stickyNoteText, addObject, updateObject]);
+
+    if (!text) return;
+
+    if (note.id) {
+      // Editing existing sticky note
+      updateObject(note.id, {
+        properties: {
+          ...note.properties,
+          text,
+        }
+      });
+    } else {
+      // Creating new sticky note
+      addObject({
+        type: 'sticky_note',
+        position: { x: note.worldX, y: note.worldY },
+        properties: {
+          text,
+          color: '#FFFACD',
+          width: note.width,
+          height: note.height,
+          fontSize: 16,
+        }
+      });
+    }
+  }, [addObject, updateObject]);
 
   // Handle mouse move
   const handleMouseMove = useCallback((e) => {
