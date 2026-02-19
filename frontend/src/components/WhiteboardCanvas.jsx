@@ -130,6 +130,62 @@ export default function WhiteboardCanvas() {
     }
   }, [stageScale, stagePos]);
 
+  // Commit inline text input (must be defined before handleMouseDown)
+  const commitTextInput = useCallback(() => {
+    if (textInputPos && textInputValue.trim()) {
+      addObject({
+        type: 'text',
+        position: { x: textInputPos.worldX, y: textInputPos.worldY },
+        properties: {
+          text: textInputValue.trim(),
+          fontSize: 20,
+          fill: '#2c3e50'
+        }
+      });
+    }
+    setTextInputPos(null);
+    setTextInputValue('');
+  }, [textInputPos, textInputValue, addObject]);
+
+  // Commit sticky note (create or update) - uses refs for reliable access
+  // Must be defined before handleMouseDown to avoid TDZ
+  const commitStickyNote = useCallback(() => {
+    const note = editingStickyNoteRef.current;
+    const text = (stickyNoteTextRef.current || '').trim();
+    if (!note) return;
+
+    // Clear state immediately to prevent double-commit
+    editingStickyNoteRef.current = null;
+    stickyNoteTextRef.current = '';
+    setEditingStickyNote(null);
+    setStickyNoteText('');
+
+    if (!text) return;
+
+    if (note.id) {
+      // Editing existing sticky note
+      updateObject(note.id, {
+        properties: {
+          ...note.properties,
+          text,
+        }
+      });
+    } else {
+      // Creating new sticky note
+      addObject({
+        type: 'sticky_note',
+        position: { x: note.worldX, y: note.worldY },
+        properties: {
+          text,
+          color: '#FFFACD',
+          width: note.width,
+          height: note.height,
+          fontSize: 16,
+        }
+      });
+    }
+  }, [addObject, updateObject]);
+
   // Handle mouse down
   const handleMouseDown = useCallback((e) => {
     const stage = e.target.getStage();
@@ -251,62 +307,7 @@ export default function WhiteboardCanvas() {
         });
         break;
     }
-  }, [tool, getWorldPos, setSelectedObjects, textInputPos, isSpaceHeld, stagePos, stageScale, commitStickyNote]);
-
-  // Commit inline text input
-  const commitTextInput = useCallback(() => {
-    if (textInputPos && textInputValue.trim()) {
-      addObject({
-        type: 'text',
-        position: { x: textInputPos.worldX, y: textInputPos.worldY },
-        properties: {
-          text: textInputValue.trim(),
-          fontSize: 20,
-          fill: '#2c3e50'
-        }
-      });
-    }
-    setTextInputPos(null);
-    setTextInputValue('');
-  }, [textInputPos, textInputValue, addObject]);
-
-  // Commit sticky note (create or update) - uses refs for reliable access
-  const commitStickyNote = useCallback(() => {
-    const note = editingStickyNoteRef.current;
-    const text = (stickyNoteTextRef.current || '').trim();
-    if (!note) return;
-
-    // Clear state immediately to prevent double-commit
-    editingStickyNoteRef.current = null;
-    stickyNoteTextRef.current = '';
-    setEditingStickyNote(null);
-    setStickyNoteText('');
-
-    if (!text) return;
-
-    if (note.id) {
-      // Editing existing sticky note
-      updateObject(note.id, {
-        properties: {
-          ...note.properties,
-          text,
-        }
-      });
-    } else {
-      // Creating new sticky note
-      addObject({
-        type: 'sticky_note',
-        position: { x: note.worldX, y: note.worldY },
-        properties: {
-          text,
-          color: '#FFFACD',
-          width: note.width,
-          height: note.height,
-          fontSize: 16,
-        }
-      });
-    }
-  }, [addObject, updateObject]);
+  }, [tool, getWorldPos, setSelectedObjects, textInputPos, isSpaceHeld, stagePos, stageScale, commitStickyNote, commitTextInput]);
 
   // Handle mouse move
   const handleMouseMove = useCallback((e) => {
