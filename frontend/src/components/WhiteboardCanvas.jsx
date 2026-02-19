@@ -1,14 +1,16 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { Stage, Layer, Rect, Circle, Text, Arrow, Line, Group } from 'react-konva';
 import { useWhiteboardStore } from '../store/whiteboardStore';
 
 const TOOLBAR_HEIGHT = 72;
-const ZOOM_SCALE_BY = 1.05;
+const ZOOM_SCALE_BY = 1.08;
 const ZOOM_MIN = 0.1;
 const ZOOM_MAX = 5;
+const GRID_SIZE = 25;
 
 export default function WhiteboardCanvas() {
   const stageRef = useRef(null);
+  const containerRef = useRef(null);
   const [viewportSize, setViewportSize] = useState({
     width: window.innerWidth,
     height: window.innerHeight - TOOLBAR_HEIGHT
@@ -34,62 +36,122 @@ export default function WhiteboardCanvas() {
   const [stageScale, setStageScale] = useState(1);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
 
+  // Space-to-pan state
+  const [isPanning, setIsPanning] = useState(false);
+  const [isSpaceHeld, setIsSpaceHeld] = useState(false);
+  const panStartRef = useRef({ x: 0, y: 0, stageX: 0, stageY: 0 });
+
   // Inline text input state
   const [textInputPos, setTextInputPos] = useState(null);
   const [textInputValue, setTextInputValue] = useState('');
   const textInputRef = useRef(null);
 
+  // Space key handling for pan mode
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.code === 'Space' && !e.repeat && e.target === document.body) {
+        e.preventDefault();
+        setIsSpaceHeld(true);
+      }
+    };
+    const handleKeyUp = (e) => {
+      if (e.code === 'Space') {
+        setIsSpaceHeld(false);
+        setIsPanning(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
   // Convert viewport pointer position to world coordinates
   const getWorldPos = useCallback((stage) => {
     const pointer = stage.getPointerPosition();
+    if (!pointer) return { x: 0, y: 0 };
     return {
       x: (pointer.x - stagePos.x) / stageScale,
       y: (pointer.y - stagePos.y) / stageScale,
     };
   }, [stagePos, stageScale]);
 
-  // Handle scroll-to-zoom
+  // Handle scroll-to-zoom (Ctrl+scroll or pinch) and scroll-to-pan
   const handleWheel = useCallback((e) => {
     e.evt.preventDefault();
     const stage = stageRef.current;
     if (!stage) return;
 
-    const oldScale = stageScale;
-    const pointer = stage.getPointerPosition();
-    const newScale = e.evt.deltaY > 0
-      ? oldScale / ZOOM_SCALE_BY
-      : oldScale * ZOOM_SCALE_BY;
-    const clampedScale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newScale));
+    // Pinch-to-zoom (ctrlKey is true for trackpad pinch) or regular scroll = zoom
+    const isZoom = e.evt.ctrlKey || e.evt.metaKey;
 
-    const mousePointTo = {
-      x: (pointer.x - stagePos.x) / oldScale,
-      y: (pointer.y - stagePos.y) / oldScale,
-    };
-    const newPos = {
-      x: pointer.x - mousePointTo.x * clampedScale,
-      y: pointer.y - mousePointTo.y * clampedScale,
-    };
+    if (isZoom) {
+      // Zoom toward pointer
+      const oldScale = stageScale;
+      const pointer = stage.getPointerPosition();
+      const newScale = e.evt.deltaY > 0
+        ? oldScale / ZOOM_SCALE_BY
+        : oldScale * ZOOM_SCALE_BY;
+      const clampedScale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newScale));
 
-    setStageScale(clampedScale);
-    setStagePos(newPos);
+      const mousePointTo = {
+        x: (pointer.x - stagePos.x) / oldScale,
+        y: (pointer.y - stagePos.y) / oldScale,
+      };
+      const newPos = {
+        x: pointer.x - mousePointTo.x * clampedScale,
+        y: pointer.y - mousePointTo.y * clampedScale,
+      };
+
+      setStageScale(clampedScale);
+      setStagePos(newPos);
+    } else {
+      // Scroll to pan
+      const dx = e.evt.deltaX;
+      const dy = e.evt.deltaY;
+      setStagePos(prev => ({
+        x: prev.x - dx,
+        y: prev.y - dy,
+      }));
+    }
   }, [stageScale, stagePos]);
 
   // Handle mouse down
   const handleMouseDown = useCallback((e) => {
+    const stage = e.target.getStage();
+    const pointer = stage.getPointerPosition();
+
+    // Middle mouse button or space held = start panning
+    if (e.evt.button === 1 || isSpaceHeld) {
+      e.evt.preventDefault();
+      setIsPanning(true);
+      panStartRef.current = {
+        x: pointer.x,
+        y: pointer.y,
+        stageX: stagePos.x,
+        stageY: stagePos.y,
+      };
+      return;
+    }
+
+    // Only process left click
+    if (e.evt.button !== 0) return;
+
     // Close text input if clicking elsewhere
     if (textInputPos && tool !== 'text') {
       commitTextInput();
     }
 
     if (tool === 'select') {
-      const clickedOnEmpty = e.target === e.target.getStage();
+      const clickedOnEmpty = e.target === stage;
       if (clickedOnEmpty) {
         setSelectedObjects([]);
       }
       return;
     }
 
-    const stage = e.target.getStage();
     const pos = getWorldPos(stage);
     setIsDrawing(true);
 
@@ -122,7 +184,6 @@ export default function WhiteboardCanvas() {
         break;
 
       case 'text': {
-        // Show inline text input at click position
         const stageContainer = stageRef.current?.container().getBoundingClientRect();
         if (stageContainer) {
           setTextInputPos({
@@ -151,7 +212,7 @@ export default function WhiteboardCanvas() {
         });
         break;
     }
-  }, [tool, getWorldPos, setSelectedObjects, textInputPos]);
+  }, [tool, getWorldPos, setSelectedObjects, textInputPos, isSpaceHeld, stagePos]);
 
   // Commit inline text input
   const commitTextInput = useCallback(() => {
@@ -173,6 +234,19 @@ export default function WhiteboardCanvas() {
   // Handle mouse move
   const handleMouseMove = useCallback((e) => {
     const stage = e.target.getStage();
+
+    // Handle panning (space+drag or middle-click drag)
+    if (isPanning) {
+      const pointer = stage.getPointerPosition();
+      const dx = pointer.x - panStartRef.current.x;
+      const dy = pointer.y - panStartRef.current.y;
+      setStagePos({
+        x: panStartRef.current.stageX + dx,
+        y: panStartRef.current.stageY + dy,
+      });
+      return;
+    }
+
     const pos = getWorldPos(stage);
 
     // Throttled cursor position broadcast (50ms)
@@ -223,12 +297,16 @@ export default function WhiteboardCanvas() {
         });
         break;
     }
-  }, [isDrawing, newObject, updateCursor, getWorldPos]);
+  }, [isPanning, isDrawing, newObject, updateCursor, getWorldPos]);
 
   // Handle mouse up
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = useCallback((e) => {
+    if (isPanning) {
+      setIsPanning(false);
+      return;
+    }
+
     if (isDrawing && newObject) {
-      // Only add if object has meaningful size
       const isValid = newObject.type === 'rectangle'
         ? Math.abs(newObject.properties.width) > 5 && Math.abs(newObject.properties.height) > 5
         : newObject.type === 'circle'
@@ -242,13 +320,42 @@ export default function WhiteboardCanvas() {
 
     setIsDrawing(false);
     setNewObject(null);
-  }, [isDrawing, newObject, addObject]);
+  }, [isPanning, isDrawing, newObject, addObject]);
 
-  // Handle stage drag end (panning)
-  const handleStageDragEnd = useCallback((e) => {
-    if (e.target === e.target.getStage()) {
-      setStagePos({ x: e.target.x(), y: e.target.y() });
-    }
+  // Zoom controls
+  const zoomIn = useCallback(() => {
+    const newScale = Math.min(ZOOM_MAX, stageScale * 1.3);
+    const centerX = viewportSize.width / 2;
+    const centerY = viewportSize.height / 2;
+    const mousePointTo = {
+      x: (centerX - stagePos.x) / stageScale,
+      y: (centerY - stagePos.y) / stageScale,
+    };
+    setStageScale(newScale);
+    setStagePos({
+      x: centerX - mousePointTo.x * newScale,
+      y: centerY - mousePointTo.y * newScale,
+    });
+  }, [stageScale, stagePos, viewportSize]);
+
+  const zoomOut = useCallback(() => {
+    const newScale = Math.max(ZOOM_MIN, stageScale / 1.3);
+    const centerX = viewportSize.width / 2;
+    const centerY = viewportSize.height / 2;
+    const mousePointTo = {
+      x: (centerX - stagePos.x) / stageScale,
+      y: (centerY - stagePos.y) / stageScale,
+    };
+    setStageScale(newScale);
+    setStagePos({
+      x: centerX - mousePointTo.x * newScale,
+      y: centerY - mousePointTo.y * newScale,
+    });
+  }, [stageScale, stagePos, viewportSize]);
+
+  const resetView = useCallback(() => {
+    setStageScale(1);
+    setStagePos({ x: 0, y: 0 });
   }, []);
 
   // Render object based on type
@@ -256,9 +363,9 @@ export default function WhiteboardCanvas() {
     const isSelected = selectedObjectIds.includes(obj.id);
     const commonProps = {
       key: obj.id || `temp-${index}`,
-      draggable: tool === 'select' && !obj.id?.startsWith('temp'),
+      draggable: tool === 'select' && !isPanning && !isSpaceHeld && !obj.id?.startsWith('temp'),
       onClick: () => {
-        if (tool === 'select') {
+        if (tool === 'select' && !isPanning) {
           setSelectedObjects([obj.id]);
         }
       },
@@ -443,7 +550,8 @@ export default function WhiteboardCanvas() {
     });
   };
 
-  React.useEffect(() => {
+  // Window resize
+  useEffect(() => {
     const handleResize = () => {
       setViewportSize({
         width: window.innerWidth,
@@ -455,13 +563,36 @@ export default function WhiteboardCanvas() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Compute dot-grid background style
+  const gridSpacing = GRID_SIZE * stageScale;
+  const gridOffsetX = stagePos.x % gridSpacing;
+  const gridOffsetY = stagePos.y % gridSpacing;
+  const dotSize = Math.max(1, stageScale * 1.5);
+
+  const canvasCursor = isSpaceHeld || isPanning
+    ? (isPanning ? 'grabbing' : 'grab')
+    : tool === 'select' ? 'default' : 'crosshair';
+
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+    <div
+      ref={containerRef}
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        cursor: canvasCursor,
+        background: `radial-gradient(circle, #ccc ${dotSize}px, transparent ${dotSize}px)`,
+        backgroundSize: `${gridSpacing}px ${gridSpacing}px`,
+        backgroundPosition: `${gridOffsetX}px ${gridOffsetY}px`,
+        backgroundColor: '#f8f9fa',
+      }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <Stage
         ref={stageRef}
         width={viewportSize.width}
         height={viewportSize.height}
-        draggable={tool === 'select'}
         scaleX={stageScale}
         scaleY={stageScale}
         x={stagePos.x}
@@ -470,25 +601,43 @@ export default function WhiteboardCanvas() {
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onDragEnd={handleStageDragEnd}
-        style={{ background: '#f8f9fa' }}
       >
         <Layer>
-          {/* Render existing objects */}
           {objects.map((obj, index) => renderObject(obj, index))}
-
-          {/* Render object being drawn */}
           {newObject && renderObject(newObject, 'new')}
-
-          {/* Render collaborative cursors */}
           {renderCursors()}
         </Layer>
       </Stage>
 
-      {/* Zoom indicator */}
-      {stageScale !== 1 && (
-        <div className="absolute bottom-4 left-4 bg-white bg-opacity-80 px-3 py-1 rounded-full text-sm text-gray-600 shadow-sm">
+      {/* Zoom controls */}
+      <div className="absolute bottom-4 left-4 flex items-center gap-1 bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
+        <button
+          onClick={zoomOut}
+          className="px-3 py-2 text-gray-600 hover:bg-gray-100 transition-colors text-lg font-medium"
+          aria-label="Zoom out"
+        >
+          -
+        </button>
+        <button
+          onClick={resetView}
+          className="px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 transition-colors min-w-[60px] text-center"
+          aria-label="Reset zoom"
+        >
           {Math.round(stageScale * 100)}%
+        </button>
+        <button
+          onClick={zoomIn}
+          className="px-3 py-2 text-gray-600 hover:bg-gray-100 transition-colors text-lg font-medium"
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+      </div>
+
+      {/* Pan hint */}
+      {isSpaceHeld && !isPanning && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black bg-opacity-70 text-white text-sm px-4 py-2 rounded-full pointer-events-none">
+          Click and drag to pan
         </div>
       )}
 
