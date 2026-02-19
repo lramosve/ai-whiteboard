@@ -4,7 +4,7 @@ import AuthModal from './AuthModal';
 import { useWhiteboardStore } from '../store/whiteboardStore';
 import {
   Square, Circle, Type, ArrowRight, MousePointer, StickyNote,
-  Trash2, Users, Wifi, WifiOff, LogIn, LogOut, User
+  Trash2, Users, Wifi, WifiOff, LogIn, LogOut, User, Frame, Copy
 } from 'lucide-react';
 
 const tools = [
@@ -13,17 +13,20 @@ const tools = [
   { id: 'circle', icon: Circle, label: 'Circle' },
   { id: 'text', icon: Type, label: 'Text' },
   { id: 'arrow', icon: ArrowRight, label: 'Arrow' },
-  { id: 'sticky_note', icon: StickyNote, label: 'Sticky Note' }
+  { id: 'sticky_note', icon: StickyNote, label: 'Sticky Note' },
+  { id: 'frame', icon: Frame, label: 'Frame' }
 ];
 
 export default function Toolbar() {
-  const { 
-    tool, 
-    setTool, 
-    selectedObjectIds, 
-    deleteObject, 
-    users, 
-    connected 
+  const {
+    tool,
+    setTool,
+    selectedObjectIds,
+    objects,
+    addObject,
+    deleteObject,
+    users,
+    connected
   } = useWhiteboardStore();
 
   const { user, logout } = useAuth();
@@ -32,6 +35,18 @@ export default function Toolbar() {
 
   const handleDelete = () => {
     selectedObjectIds.forEach(id => deleteObject(id));
+  };
+
+  const handleDuplicate = () => {
+    objects
+      .filter(o => selectedObjectIds.includes(o.id))
+      .forEach(o => {
+        addObject({
+          type: o.object_type || o.type,
+          position: { x: (o.position?.x || 0) + 20, y: (o.position?.y || 0) + 20 },
+          properties: { ...o.properties },
+        });
+      });
   };
 
   const handleAuthClick = (mode) => {
@@ -80,6 +95,19 @@ export default function Toolbar() {
           {/* Delete button */}
           <div className="w-px h-6 bg-gray-300 mx-1" />
           <button
+            onClick={handleDuplicate}
+            disabled={selectedObjectIds.length === 0}
+            className={`p-2 rounded transition-all ${
+              selectedObjectIds.length > 0
+                ? 'bg-white text-gray-700 hover:bg-gray-50'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            }`}
+            title="Duplicate (Ctrl+D)"
+            aria-label="Duplicate selected objects"
+          >
+            <Copy className="w-5 h-5" aria-hidden="true" />
+          </button>
+          <button
             onClick={handleDelete}
             disabled={selectedObjectIds.length === 0}
             className={`p-2 rounded transition-all ${
@@ -87,7 +115,7 @@ export default function Toolbar() {
                 ? 'bg-white text-red-600 hover:bg-red-50'
                 : 'bg-gray-200 text-gray-400 cursor-not-allowed'
             }`}
-            title="Delete selected"
+            title="Delete (Del)"
             aria-label="Delete selected objects"
           >
             <Trash2 className="w-5 h-5" aria-hidden="true" />

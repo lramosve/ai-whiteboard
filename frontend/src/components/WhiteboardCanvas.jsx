@@ -128,6 +128,8 @@ export default function WhiteboardCanvas() {
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [newObject, setNewObject] = useState(null);
+  const [selectionBox, setSelectionBox] = useState(null);
+  const clipboardRef = useRef([]);
   const lastCursorSendRef = useRef(0);
 
   // Pan/zoom state
@@ -193,6 +195,74 @@ export default function WhiteboardCanvas() {
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, []);
+
+  // Keyboard shortcuts: copy, paste, duplicate, delete
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ignore if typing in an input/textarea
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      const isMod = e.ctrlKey || e.metaKey;
+
+      // Delete / Backspace
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedObjectIds.length > 0) {
+        e.preventDefault();
+        const { deleteObject } = useWhiteboardStore.getState();
+        selectedObjectIds.forEach(id => deleteObject(id));
+        return;
+      }
+
+      // Ctrl+C — Copy
+      if (isMod && e.key === 'c') {
+        if (selectedObjectIds.length > 0) {
+          clipboardRef.current = objects
+            .filter(o => selectedObjectIds.includes(o.id))
+            .map(o => ({ ...o, properties: { ...o.properties } }));
+        }
+        return;
+      }
+
+      // Ctrl+V — Paste
+      if (isMod && e.key === 'v') {
+        e.preventDefault();
+        if (clipboardRef.current.length > 0) {
+          const newIds = [];
+          clipboardRef.current.forEach(o => {
+            addObject({
+              type: o.object_type || o.type,
+              position: { x: (o.position?.x || 0) + 30, y: (o.position?.y || 0) + 30 },
+              properties: { ...o.properties, rotation: o.properties.rotation || 0 },
+            });
+          });
+          // Shift clipboard offset for subsequent pastes
+          clipboardRef.current = clipboardRef.current.map(o => ({
+            ...o,
+            position: { x: (o.position?.x || 0) + 30, y: (o.position?.y || 0) + 30 },
+          }));
+        }
+        return;
+      }
+
+      // Ctrl+D — Duplicate
+      if (isMod && e.key === 'd') {
+        e.preventDefault();
+        if (selectedObjectIds.length > 0) {
+          objects
+            .filter(o => selectedObjectIds.includes(o.id))
+            .forEach(o => {
+              addObject({
+                type: o.object_type || o.type,
+                position: { x: (o.position?.x || 0) + 20, y: (o.position?.y || 0) + 20 },
+                properties: { ...o.properties },
+              });
+            });
+        }
+        return;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedObjectIds, objects, addObject]);
 
   // Convert viewport pointer position to world coordinates
   const getWorldPos = useCallback((stage) => {
@@ -310,6 +380,7 @@ export default function WhiteboardCanvas() {
     if (!obj) return;
 
     const objType = obj.object_type || obj.type;
+    const rotation = node.rotation();
     const updates = { position: { x: node.x(), y: node.y() } };
 
     switch (objType) {
@@ -320,24 +391,28 @@ export default function WhiteboardCanvas() {
           ...obj.properties,
           width: Math.max(5, (obj.properties.width || 200) * scaleX),
           height: Math.max(5, (obj.properties.height || 200) * scaleY),
+          rotation,
         };
         break;
       case 'circle':
         updates.properties = {
           ...obj.properties,
           radius: Math.max(5, obj.properties.radius * Math.max(scaleX, scaleY)),
+          rotation,
         };
         break;
       case 'text':
         updates.properties = {
           ...obj.properties,
           fontSize: Math.max(8, (obj.properties.fontSize || 20) * Math.max(scaleX, scaleY)),
+          rotation,
         };
         break;
       case 'arrow':
         updates.properties = {
           ...obj.properties,
           points: obj.properties.points.map((p, i) => p * (i % 2 === 0 ? scaleX : scaleY)),
+          rotation,
         };
         break;
       default:
@@ -385,7 +460,13 @@ export default function WhiteboardCanvas() {
     if (tool === 'select') {
       const clickedOnEmpty = e.target === stage;
       if (clickedOnEmpty) {
-        setSelectedObjects([]);
+        if (!e.evt.shiftKey) {
+          setSelectedObjects([]);
+        }
+        // Start rubber band selection
+        const pos = getWorldPos(stage);
+        setSelectionBox({ x: pos.x, y: pos.y, width: 0, height: 0 });
+        setIsDrawing(true);
       }
       return;
     }
@@ -458,6 +539,21 @@ export default function WhiteboardCanvas() {
         break;
       }
 
+      case 'frame':
+        setNewObject({
+          type: 'frame',
+          position: { x: pos.x, y: pos.y },
+          properties: {
+            width: 0,
+            height: 0,
+            fill: 'rgba(0,0,0,0.02)',
+            stroke: '#95a5a6',
+            strokeWidth: 2,
+            title: 'Frame',
+          }
+        });
+        break;
+
       case 'arrow': {
         const fromTarget = findSnapTarget(objects, pos.x, pos.y);
         const startPt = fromTarget ? getObjectCenter(fromTarget) : { x: pos.x, y: pos.y };
@@ -504,13 +600,26 @@ export default function WhiteboardCanvas() {
       updateCursor(pos);
     }
 
-    if (!isDrawing || !newObject) return;
+    if (!isDrawing) return;
+
+    // Handle rubber band selection box
+    if (selectionBox) {
+      setSelectionBox(prev => ({
+        ...prev,
+        width: pos.x - prev.x,
+        height: pos.y - prev.y,
+      }));
+      return;
+    }
+
+    if (!newObject) return;
 
     const startX = newObject.position.x;
     const startY = newObject.position.y;
 
     switch (newObject.type) {
       case 'rectangle':
+      case 'frame':
         setNewObject({
           ...newObject,
           properties: {
@@ -553,6 +662,34 @@ export default function WhiteboardCanvas() {
     }
   }, [isPanning, isDrawing, newObject, updateCursor, getWorldPos]);
 
+  // Get bounding box of an object for hit-testing
+  const getObjectBounds = useCallback((obj) => {
+    const pos = obj.position || { x: 0, y: 0 };
+    const type = obj.object_type || obj.type;
+    switch (type) {
+      case 'rectangle':
+      case 'frame':
+      case 'sticky_note':
+        return { x: pos.x, y: pos.y, w: obj.properties.width || 200, h: obj.properties.height || 200 };
+      case 'circle': {
+        const r = obj.properties.radius || 50;
+        return { x: pos.x - r, y: pos.y - r, w: r * 2, h: r * 2 };
+      }
+      case 'text':
+        return { x: pos.x, y: pos.y, w: 100, h: 24 };
+      case 'arrow': {
+        const pts = obj.properties.points || [0, 0, 0, 0];
+        const xs = pts.filter((_, i) => i % 2 === 0);
+        const ys = pts.filter((_, i) => i % 2 === 1);
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        return { x: minX, y: minY, w: Math.max(...xs) - minX, h: Math.max(...ys) - minY };
+      }
+      default:
+        return { x: pos.x, y: pos.y, w: 50, h: 50 };
+    }
+  }, []);
+
   // Handle mouse up
   const handleMouseUp = useCallback((e) => {
     if (isPanning) {
@@ -560,8 +697,36 @@ export default function WhiteboardCanvas() {
       return;
     }
 
+    // Handle rubber band selection
+    if (selectionBox && isDrawing) {
+      const bx = selectionBox.width < 0 ? selectionBox.x + selectionBox.width : selectionBox.x;
+      const by = selectionBox.height < 0 ? selectionBox.y + selectionBox.height : selectionBox.y;
+      const bw = Math.abs(selectionBox.width);
+      const bh = Math.abs(selectionBox.height);
+
+      if (bw > 3 || bh > 3) {
+        const idsInBox = objects
+          .filter(obj => {
+            const ob = getObjectBounds(obj);
+            return ob.x < bx + bw && ob.x + ob.w > bx && ob.y < by + bh && ob.y + ob.h > by;
+          })
+          .map(o => o.id);
+
+        if (e.evt?.shiftKey) {
+          const merged = [...new Set([...selectedObjectIds, ...idsInBox])];
+          setSelectedObjects(merged);
+        } else {
+          setSelectedObjects(idsInBox);
+        }
+      }
+
+      setSelectionBox(null);
+      setIsDrawing(false);
+      return;
+    }
+
     if (isDrawing && newObject) {
-      const isValid = newObject.type === 'rectangle'
+      const isValid = (newObject.type === 'rectangle' || newObject.type === 'frame')
         ? Math.abs(newObject.properties.width) > 5 && Math.abs(newObject.properties.height) > 5
         : newObject.type === 'circle'
         ? newObject.properties.radius > 5
@@ -574,7 +739,7 @@ export default function WhiteboardCanvas() {
 
     setIsDrawing(false);
     setNewObject(null);
-  }, [isPanning, isDrawing, newObject, addObject]);
+  }, [isPanning, isDrawing, newObject, addObject, selectionBox, objects, selectedObjectIds, setSelectedObjects, getObjectBounds]);
 
   // Zoom controls
   const zoomIn = useCallback(() => {
@@ -618,10 +783,19 @@ export default function WhiteboardCanvas() {
     const commonProps = {
       key: obj.id || `temp-${index}`,
       id: obj.id,
+      rotation: obj.properties.rotation || 0,
       draggable: tool === 'select' && !isPanning && !isSpaceHeld && !obj.id?.startsWith('temp'),
-      onClick: () => {
+      onClick: (e) => {
         if (tool === 'select' && !isPanning) {
-          setSelectedObjects([obj.id]);
+          if (e.evt.shiftKey) {
+            if (selectedObjectIds.includes(obj.id)) {
+              setSelectedObjects(selectedObjectIds.filter(id => id !== obj.id));
+            } else {
+              setSelectedObjects([...selectedObjectIds, obj.id]);
+            }
+          } else {
+            setSelectedObjects([obj.id]);
+          }
         }
       },
       onDragEnd: (e) => {
@@ -816,30 +990,44 @@ export default function WhiteboardCanvas() {
     }
   };
 
-  // Render collaborative cursors
+  // Render collaborative cursors with name badges
   const renderCursors = () => {
     return Object.entries(cursors).map(([userId, cursor]) => {
       const user = users[userId];
       if (!user) return null;
+      const name = cursor.userName || user.name || 'Guest';
 
       return (
-        <React.Fragment key={userId}>
-          <Circle
-            x={cursor.x}
-            y={cursor.y}
-            radius={5}
+        <Group key={userId} x={cursor.x} y={cursor.y} listening={false}>
+          {/* Cursor arrow */}
+          <Line
+            points={[0, 0, 0, 14, 4, 11, 8, 18, 11, 17, 7, 10, 12, 10]}
             fill={user.color}
-            listening={false}
+            stroke="#fff"
+            strokeWidth={1}
+            closed={true}
+          />
+          {/* Name badge */}
+          <Rect
+            x={12}
+            y={14}
+            width={name.length * 7 + 12}
+            height={20}
+            fill={user.color}
+            cornerRadius={4}
+            shadowColor="rgba(0,0,0,0.2)"
+            shadowBlur={3}
+            shadowOffsetY={1}
           />
           <Text
-            x={cursor.x + 10}
-            y={cursor.y + 10}
-            text={cursor.userName || user.name}
+            x={18}
+            y={17}
+            text={name}
             fontSize={12}
-            fill={user.color}
-            listening={false}
+            fontFamily="Arial"
+            fill="#fff"
           />
-        </React.Fragment>
+        </Group>
       );
     });
   };
@@ -900,9 +1088,22 @@ export default function WhiteboardCanvas() {
           {objects.map((obj, index) => renderObject(obj, index))}
           {newObject && renderObject(newObject, 'new')}
           {renderCursors()}
+          {selectionBox && (
+            <Rect
+              x={selectionBox.x}
+              y={selectionBox.y}
+              width={selectionBox.width}
+              height={selectionBox.height}
+              fill="rgba(74, 144, 217, 0.1)"
+              stroke="#4A90D9"
+              strokeWidth={1}
+              dash={[4, 4]}
+              listening={false}
+            />
+          )}
           <Transformer
             ref={transformerRef}
-            rotateEnabled={false}
+            rotateEnabled={true}
             enabledAnchors={['top-left','top-center','top-right','middle-left','middle-right','bottom-left','bottom-center','bottom-right']}
             boundBoxFunc={(oldBox, newBox) => {
               if (Math.abs(newBox.width) < 5 || Math.abs(newBox.height) < 5) return oldBox;
