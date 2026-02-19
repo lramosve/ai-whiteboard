@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import AuthModal from './AuthModal';
 import { useWhiteboardStore } from '../store/whiteboardStore';
-import { 
-  Square, Circle, Type, ArrowRight, MousePointer, 
+import {
+  Square, Circle, Type, ArrowRight, MousePointer, StickyNote,
   Trash2, Users, Wifi, WifiOff, LogIn, LogOut, User
 } from 'lucide-react';
 
@@ -12,7 +12,8 @@ const tools = [
   { id: 'rectangle', icon: Square, label: 'Rectangle' },
   { id: 'circle', icon: Circle, label: 'Circle' },
   { id: 'text', icon: Type, label: 'Text' },
-  { id: 'arrow', icon: ArrowRight, label: 'Arrow' }
+  { id: 'arrow', icon: ArrowRight, label: 'Arrow' },
+  { id: 'sticky_note', icon: StickyNote, label: 'Sticky Note' }
 ];
 
 export default function Toolbar() {

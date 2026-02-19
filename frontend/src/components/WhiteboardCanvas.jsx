@@ -46,6 +46,11 @@ export default function WhiteboardCanvas() {
   const [textInputValue, setTextInputValue] = useState('');
   const textInputRef = useRef(null);
 
+  // Sticky note editing state
+  const [editingStickyNote, setEditingStickyNote] = useState(null); // { id, x, y, width, height, text }
+  const [stickyNoteText, setStickyNoteText] = useState('');
+  const stickyNoteInputRef = useRef(null);
+
   // Space key handling for pan mode
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -198,6 +203,28 @@ export default function WhiteboardCanvas() {
         break;
       }
 
+      case 'sticky_note': {
+        // Create a sticky note and immediately open it for editing
+        const noteWidth = 200;
+        const noteHeight = 200;
+        const stageContainer = stageRef.current?.container().getBoundingClientRect();
+        if (stageContainer) {
+          setEditingStickyNote({
+            id: null, // null = creating new
+            worldX: pos.x,
+            worldY: pos.y,
+            width: noteWidth,
+            height: noteHeight,
+            screenX: pos.x * stageScale + stagePos.x,
+            screenY: pos.y * stageScale + stagePos.y,
+          });
+          setStickyNoteText('');
+          setIsDrawing(false);
+          setTimeout(() => stickyNoteInputRef.current?.focus(), 0);
+        }
+        break;
+      }
+
       case 'arrow':
         setNewObject({
           type: 'arrow',
@@ -212,7 +239,7 @@ export default function WhiteboardCanvas() {
         });
         break;
     }
-  }, [tool, getWorldPos, setSelectedObjects, textInputPos, isSpaceHeld, stagePos]);
+  }, [tool, getWorldPos, setSelectedObjects, textInputPos, isSpaceHeld, stagePos, stageScale]);
 
   // Commit inline text input
   const commitTextInput = useCallback(() => {
@@ -230,6 +257,40 @@ export default function WhiteboardCanvas() {
     setTextInputPos(null);
     setTextInputValue('');
   }, [textInputPos, textInputValue, addObject]);
+
+  // Commit sticky note (create or update)
+  const commitStickyNote = useCallback(() => {
+    if (!editingStickyNote) return;
+    const text = stickyNoteText.trim();
+    if (editingStickyNote.id) {
+      // Editing existing sticky note
+      if (text) {
+        updateObject(editingStickyNote.id, {
+          properties: {
+            ...editingStickyNote.properties,
+            text,
+          }
+        });
+      }
+    } else {
+      // Creating new sticky note
+      if (text) {
+        addObject({
+          type: 'sticky_note',
+          position: { x: editingStickyNote.worldX, y: editingStickyNote.worldY },
+          properties: {
+            text,
+            color: '#FFFACD',
+            width: editingStickyNote.width,
+            height: editingStickyNote.height,
+            fontSize: 16,
+          }
+        });
+      }
+    }
+    setEditingStickyNote(null);
+    setStickyNoteText('');
+  }, [editingStickyNote, stickyNoteText, addObject, updateObject]);
 
   // Handle mouse move
   const handleMouseMove = useCallback((e) => {
@@ -438,7 +499,27 @@ export default function WhiteboardCanvas() {
         const noteWidth = obj.properties.width || 200;
         const noteHeight = obj.properties.height || 200;
         return (
-          <Group {...commonProps} x={position.x} y={position.y}>
+          <Group
+            {...commonProps}
+            x={position.x}
+            y={position.y}
+            onDblClick={() => {
+              if (tool === 'select') {
+                setEditingStickyNote({
+                  id: obj.id,
+                  worldX: position.x,
+                  worldY: position.y,
+                  width: noteWidth,
+                  height: noteHeight,
+                  screenX: position.x * stageScale + stagePos.x,
+                  screenY: position.y * stageScale + stagePos.y,
+                  properties: obj.properties,
+                });
+                setStickyNoteText(obj.properties.text || '');
+                setTimeout(() => stickyNoteInputRef.current?.focus(), 0);
+              }
+            }}
+          >
             <Rect
               width={noteWidth}
               height={noteHeight}
@@ -666,6 +747,43 @@ export default function WhiteboardCanvas() {
             zIndex: 10,
           }}
         />
+      )}
+
+      {/* Sticky note text editor overlay */}
+      {editingStickyNote && (
+        <div
+          className="absolute"
+          style={{
+            left: editingStickyNote.screenX,
+            top: editingStickyNote.screenY,
+            width: editingStickyNote.width * stageScale,
+            height: editingStickyNote.height * stageScale,
+            zIndex: 10,
+          }}
+        >
+          <textarea
+            ref={stickyNoteInputRef}
+            value={stickyNoteText}
+            onChange={(e) => setStickyNoteText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setEditingStickyNote(null);
+                setStickyNoteText('');
+              }
+            }}
+            onBlur={commitStickyNote}
+            placeholder="Type your note..."
+            className="w-full h-full resize-none outline-none rounded shadow-lg"
+            style={{
+              padding: `${12 * stageScale}px`,
+              fontSize: `${16 * stageScale}px`,
+              fontFamily: 'Arial',
+              color: '#333',
+              backgroundColor: editingStickyNote.properties?.color || '#FFFACD',
+              border: '2px solid #f39c12',
+            }}
+          />
+        </div>
       )}
     </div>
   );
