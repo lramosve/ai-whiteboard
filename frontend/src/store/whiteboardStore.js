@@ -284,6 +284,18 @@ export const useWhiteboardStore = create((set, get) => ({
         body: JSON.stringify({ boardId, command }),
       });
 
+      if (!res.ok) {
+        const text = await res.text();
+        let message;
+        try {
+          const json = JSON.parse(text);
+          message = json.message || json.error || `Server error (${res.status})`;
+        } catch {
+          message = `Server error (${res.status})`;
+        }
+        throw new Error(message);
+      }
+
       const data = await res.json();
 
       set((state) => ({
