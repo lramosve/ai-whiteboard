@@ -1,6 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { Stage, Layer, Rect, Circle, Text, Arrow, Line, Group } from 'react-konva';
+import { Stage, Layer, Rect, Circle, Text, Arrow, Line, Group, Transformer } from 'react-konva';
 import { useWhiteboardStore } from '../store/whiteboardStore';
+import Minimap from './Minimap';
 
 const TOOLBAR_HEIGHT = 72;
 const ZOOM_SCALE_BY = 1.08;
@@ -11,6 +12,8 @@ const GRID_SIZE = 25;
 export default function WhiteboardCanvas() {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
+  const shapeRefsMap = useRef(new Map());
+  const transformerRef = useRef(null);
   const [viewportSize, setViewportSize] = useState({
     width: window.innerWidth,
     height: window.innerHeight - TOOLBAR_HEIGHT
@@ -57,6 +60,30 @@ export default function WhiteboardCanvas() {
   // Keep refs in sync with state
   useEffect(() => { editingStickyNoteRef.current = editingStickyNote; }, [editingStickyNote]);
   useEffect(() => { stickyNoteTextRef.current = stickyNoteText; }, [stickyNoteText]);
+
+  // Register/unregister shape refs for Transformer
+  const setShapeRef = useCallback((id, node) => {
+    if (node) {
+      shapeRefsMap.current.set(id, node);
+    } else {
+      shapeRefsMap.current.delete(id);
+    }
+  }, []);
+
+  // Sync Transformer nodes to current selection
+  useEffect(() => {
+    const tr = transformerRef.current;
+    if (!tr) return;
+    if (tool === 'select' && selectedObjectIds.length > 0) {
+      const nodes = selectedObjectIds
+        .map(id => shapeRefsMap.current.get(id))
+        .filter(Boolean);
+      tr.nodes(nodes);
+    } else {
+      tr.nodes([]);
+    }
+    tr.getLayer()?.batchDraw();
+  }, [selectedObjectIds, tool, objects]);
 
   // Space key handling for pan mode
   useEffect(() => {
@@ -185,6 +212,57 @@ export default function WhiteboardCanvas() {
       });
     }
   }, [addObject, updateObject]);
+
+  // Handle transform end (resize via Transformer)
+  const handleTransformEnd = useCallback((e) => {
+    const node = e.target;
+    const id = node.id();
+    const scaleX = node.scaleX();
+    const scaleY = node.scaleY();
+    const obj = objects.find(o => o.id === id);
+    if (!obj) return;
+
+    const objType = obj.object_type || obj.type;
+    const updates = { position: { x: node.x(), y: node.y() } };
+
+    switch (objType) {
+      case 'rectangle':
+      case 'frame':
+      case 'sticky_note':
+        updates.properties = {
+          ...obj.properties,
+          width: Math.max(5, (obj.properties.width || 200) * scaleX),
+          height: Math.max(5, (obj.properties.height || 200) * scaleY),
+        };
+        break;
+      case 'circle':
+        updates.properties = {
+          ...obj.properties,
+          radius: Math.max(5, obj.properties.radius * Math.max(scaleX, scaleY)),
+        };
+        break;
+      case 'text':
+        updates.properties = {
+          ...obj.properties,
+          fontSize: Math.max(8, (obj.properties.fontSize || 20) * Math.max(scaleX, scaleY)),
+        };
+        break;
+      case 'arrow':
+        updates.properties = {
+          ...obj.properties,
+          points: obj.properties.points.map((p, i) => p * (i % 2 === 0 ? scaleX : scaleY)),
+        };
+        break;
+      default:
+        break;
+    }
+
+    // Reset node scale
+    node.scaleX(1);
+    node.scaleY(1);
+
+    updateObject(id, updates);
+  }, [objects, updateObject]);
 
   // Handle mouse down
   const handleMouseDown = useCallback((e) => {
@@ -441,6 +519,8 @@ export default function WhiteboardCanvas() {
     const isSelected = selectedObjectIds.includes(obj.id);
     const commonProps = {
       key: obj.id || `temp-${index}`,
+      id: obj.id,
+      ref: (node) => obj.id && setShapeRef(obj.id, node),
       draggable: tool === 'select' && !isPanning && !isSpaceHeld && !obj.id?.startsWith('temp'),
       onClick: () => {
         if (tool === 'select' && !isPanning) {
@@ -451,7 +531,8 @@ export default function WhiteboardCanvas() {
         updateObject(obj.id, {
           position: { x: e.target.x(), y: e.target.y() }
         });
-      }
+      },
+      onTransformEnd: handleTransformEnd,
     };
 
     const position = obj.position || { x: 0, y: 0 };
@@ -704,6 +785,20 @@ export default function WhiteboardCanvas() {
           {objects.map((obj, index) => renderObject(obj, index))}
           {newObject && renderObject(newObject, 'new')}
           {renderCursors()}
+          <Transformer
+            ref={transformerRef}
+            rotateEnabled={false}
+            enabledAnchors={['top-left','top-center','top-right','middle-left','middle-right','bottom-left','bottom-center','bottom-right']}
+            boundBoxFunc={(oldBox, newBox) => {
+              if (Math.abs(newBox.width) < 5 || Math.abs(newBox.height) < 5) return oldBox;
+              return newBox;
+            }}
+            borderStroke="#4A90D9"
+            anchorFill="#FFFFFF"
+            anchorStroke="#4A90D9"
+            anchorSize={8}
+            anchorCornerRadius={2}
+          />
         </Layer>
       </Stage>
 
@@ -802,6 +897,15 @@ export default function WhiteboardCanvas() {
           />
         </div>
       )}
+
+      {/* Minimap */}
+      <Minimap
+        objects={objects}
+        stageScale={stageScale}
+        stagePos={stagePos}
+        viewportSize={viewportSize}
+        onNavigate={setStagePos}
+      />
     </div>
   );
 }
