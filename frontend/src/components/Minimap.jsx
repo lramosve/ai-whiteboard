@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useCallback, useState } from 'react';
 
 const MINIMAP_WIDTH = 200;
 const MINIMAP_HEIGHT = 150;
-const PADDING = 20;
+const PADDING = 40;
 
 const TYPE_COLORS = {
   rectangle: '#3498db',
@@ -16,11 +16,10 @@ const TYPE_COLORS = {
 
 export default function Minimap({ objects, stageScale, stagePos, viewportSize, onNavigate }) {
   const canvasRef = useRef(null);
-  const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
 
   // Get world bounding box of all objects + viewport
   const getWorldBounds = useCallback(() => {
-    // Viewport in world coords
     const vpLeft = -stagePos.x / stageScale;
     const vpTop = -stagePos.y / stageScale;
     const vpRight = vpLeft + viewportSize.width / stageScale;
@@ -76,7 +75,6 @@ export default function Minimap({ objects, stageScale, stagePos, viewportSize, o
       maxY = Math.max(maxY, bottom);
     }
 
-    // Add padding
     minX -= PADDING;
     minY -= PADDING;
     maxX += PADDING;
@@ -85,48 +83,63 @@ export default function Minimap({ objects, stageScale, stagePos, viewportSize, o
     return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
   }, [objects, stageScale, stagePos, viewportSize]);
 
+  // Compute minimap scale and offset from bounds
+  const getScaleAndOffset = useCallback((bounds) => {
+    const scale = Math.min(
+      (MINIMAP_WIDTH - 10) / Math.max(bounds.width, 1),
+      (MINIMAP_HEIGHT - 10) / Math.max(bounds.height, 1)
+    );
+    const offsetX = (MINIMAP_WIDTH - bounds.width * scale) / 2;
+    const offsetY = (MINIMAP_HEIGHT - bounds.height * scale) / 2;
+    return { scale, offsetX, offsetY };
+  }, []);
+
   // Convert minimap click to world coords and navigate
   const navigateToPoint = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
     const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
     const my = (e.clientY - rect.top) * (canvas.height / rect.height);
 
     const bounds = getWorldBounds();
-    const scale = Math.min(
-      (MINIMAP_WIDTH - 10) / bounds.width,
-      (MINIMAP_HEIGHT - 10) / bounds.height
-    );
-    const offsetX = (MINIMAP_WIDTH - bounds.width * scale) / 2;
-    const offsetY = (MINIMAP_HEIGHT - bounds.height * scale) / 2;
+    const { scale, offsetX, offsetY } = getScaleAndOffset(bounds);
 
-    // Convert minimap coords to world coords
     const worldX = (mx - offsetX) / scale + bounds.minX;
     const worldY = (my - offsetY) / scale + bounds.minY;
 
-    // Center viewport on this world point
-    const newStagePos = {
-      x: -(worldX - viewportSize.width / (2 * stageScale)) * stageScale,
-      y: -(worldY - viewportSize.height / (2 * stageScale)) * stageScale,
-    };
-    onNavigate(newStagePos);
-  }, [getWorldBounds, viewportSize, stageScale, onNavigate]);
+    const newX = -(worldX - viewportSize.width / (2 * stageScale)) * stageScale;
+    const newY = -(worldY - viewportSize.height / (2 * stageScale)) * stageScale;
 
+    // Guard against NaN/Infinity
+    if (!isFinite(newX) || !isFinite(newY)) return;
+
+    onNavigate({ x: newX, y: newY });
+  }, [getWorldBounds, getScaleAndOffset, viewportSize, stageScale, onNavigate]);
+
+  // Use window-level listeners for drag to handle mouse leaving the canvas
   const handleMouseDown = useCallback((e) => {
-    setIsDragging(true);
+    e.stopPropagation();
+    e.preventDefault();
+    isDraggingRef.current = true;
     navigateToPoint(e);
+
+    const handleWindowMouseMove = (e) => {
+      if (isDraggingRef.current) {
+        e.preventDefault();
+        navigateToPoint(e);
+      }
+    };
+    const handleWindowMouseUp = () => {
+      isDraggingRef.current = false;
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
   }, [navigateToPoint]);
-
-  const handleMouseMove = useCallback((e) => {
-    if (isDragging) {
-      navigateToPoint(e);
-    }
-  }, [isDragging, navigateToPoint]);
-
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-  }, []);
 
   // Draw minimap
   useEffect(() => {
@@ -135,12 +148,7 @@ export default function Minimap({ objects, stageScale, stagePos, viewportSize, o
     const ctx = canvas.getContext('2d');
 
     const bounds = getWorldBounds();
-    const scale = Math.min(
-      (MINIMAP_WIDTH - 10) / bounds.width,
-      (MINIMAP_HEIGHT - 10) / bounds.height
-    );
-    const offsetX = (MINIMAP_WIDTH - bounds.width * scale) / 2;
-    const offsetY = (MINIMAP_HEIGHT - bounds.height * scale) / 2;
+    const { scale, offsetX, offsetY } = getScaleAndOffset(bounds);
 
     // Clear
     ctx.clearRect(0, 0, MINIMAP_WIDTH, MINIMAP_HEIGHT);
@@ -219,7 +227,7 @@ export default function Minimap({ objects, stageScale, stagePos, viewportSize, o
     ctx.strokeRect(vx, vy, vw, vh);
     ctx.fillStyle = 'rgba(74, 144, 217, 0.1)';
     ctx.fillRect(vx, vy, vw, vh);
-  }, [objects, stageScale, stagePos, viewportSize, getWorldBounds]);
+  }, [objects, stageScale, stagePos, viewportSize, getWorldBounds, getScaleAndOffset]);
 
   return (
     <canvas
@@ -227,9 +235,6 @@ export default function Minimap({ objects, stageScale, stagePos, viewportSize, o
       width={MINIMAP_WIDTH}
       height={MINIMAP_HEIGHT}
       onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
       style={{
         position: 'absolute',
         bottom: 16,

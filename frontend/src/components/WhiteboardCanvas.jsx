@@ -8,11 +8,106 @@ const ZOOM_SCALE_BY = 1.08;
 const ZOOM_MIN = 0.1;
 const ZOOM_MAX = 5;
 const GRID_SIZE = 25;
+const SNAP_DISTANCE = 30;
+
+// Get the bounding box center of an object
+function getObjectCenter(obj) {
+  const pos = obj.position || { x: 0, y: 0 };
+  const type = obj.object_type || obj.type;
+  switch (type) {
+    case 'rectangle':
+    case 'frame':
+    case 'sticky_note':
+      return {
+        x: pos.x + (obj.properties.width || 200) / 2,
+        y: pos.y + (obj.properties.height || 200) / 2,
+      };
+    case 'circle':
+      return { x: pos.x, y: pos.y };
+    case 'text':
+      return { x: pos.x + 50, y: pos.y + 10 };
+    default:
+      return pos;
+  }
+}
+
+// Get edge connection point on an object closest to a target point
+function getEdgePoint(obj, targetX, targetY) {
+  const pos = obj.position || { x: 0, y: 0 };
+  const type = obj.object_type || obj.type;
+  const center = getObjectCenter(obj);
+  const dx = targetX - center.x;
+  const dy = targetY - center.y;
+  const angle = Math.atan2(dy, dx);
+
+  switch (type) {
+    case 'circle': {
+      const r = obj.properties.radius || 50;
+      return { x: center.x + r * Math.cos(angle), y: center.y + r * Math.sin(angle) };
+    }
+    case 'rectangle':
+    case 'frame':
+    case 'sticky_note': {
+      const w = (obj.properties.width || 200) / 2;
+      const h = (obj.properties.height || 200) / 2;
+      // Find intersection of ray from center with rectangle edge
+      const absCos = Math.abs(Math.cos(angle));
+      const absSin = Math.abs(Math.sin(angle));
+      let edgeX, edgeY;
+      if (w * absSin <= h * absCos) {
+        // Hits left or right edge
+        edgeX = center.x + (dx > 0 ? w : -w);
+        edgeY = center.y + (dx !== 0 ? w * Math.tan(angle) * (dx > 0 ? 1 : -1) : 0);
+      } else {
+        // Hits top or bottom edge
+        edgeX = center.x + (dy !== 0 ? h / Math.tan(angle) * (dy > 0 ? 1 : -1) : 0);
+        edgeY = center.y + (dy > 0 ? h : -h);
+      }
+      return { x: edgeX, y: edgeY };
+    }
+    default:
+      return center;
+  }
+}
+
+// Find the closest object to a given point (within snap distance)
+function findSnapTarget(objects, worldX, worldY, excludeIds = []) {
+  let closest = null;
+  let closestDist = SNAP_DISTANCE;
+  for (const obj of objects) {
+    const type = obj.object_type || obj.type;
+    if (['arrow', 'connector'].includes(type)) continue;
+    if (excludeIds.includes(obj.id)) continue;
+    const center = getObjectCenter(obj);
+    const dist = Math.sqrt((center.x - worldX) ** 2 + (center.y - worldY) ** 2);
+    // Also check bounding box proximity for large objects
+    const pos = obj.position || { x: 0, y: 0 };
+    let inBounds = false;
+    if (type === 'circle') {
+      inBounds = dist <= (obj.properties.radius || 50) + SNAP_DISTANCE;
+    } else {
+      const w = obj.properties.width || 200;
+      const h = obj.properties.height || 200;
+      inBounds = worldX >= pos.x - SNAP_DISTANCE && worldX <= pos.x + w + SNAP_DISTANCE &&
+                 worldY >= pos.y - SNAP_DISTANCE && worldY <= pos.y + h + SNAP_DISTANCE;
+    }
+    if (inBounds && dist < closestDist) {
+      closestDist = dist;
+      closest = obj;
+    }
+    // For larger objects, use center distance as fallback
+    if (!closest && dist < closestDist * 3) {
+      closestDist = dist;
+      closest = obj;
+    }
+  }
+  return closest;
+}
 
 export default function WhiteboardCanvas() {
   const stageRef = useRef(null);
   const containerRef = useRef(null);
-  const shapeRefsMap = useRef(new Map());
+  const layerRef = useRef(null);
   const transformerRef = useRef(null);
   const [viewportSize, setViewportSize] = useState({
     width: window.innerWidth,
@@ -61,28 +156,20 @@ export default function WhiteboardCanvas() {
   useEffect(() => { editingStickyNoteRef.current = editingStickyNote; }, [editingStickyNote]);
   useEffect(() => { stickyNoteTextRef.current = stickyNoteText; }, [stickyNoteText]);
 
-  // Register/unregister shape refs for Transformer
-  const setShapeRef = useCallback((id, node) => {
-    if (node) {
-      shapeRefsMap.current.set(id, node);
-    } else {
-      shapeRefsMap.current.delete(id);
-    }
-  }, []);
-
-  // Sync Transformer nodes to current selection
+  // Sync Transformer nodes to current selection using Konva layer.findOne
   useEffect(() => {
     const tr = transformerRef.current;
-    if (!tr) return;
+    const layer = layerRef.current;
+    if (!tr || !layer) return;
     if (tool === 'select' && selectedObjectIds.length > 0) {
       const nodes = selectedObjectIds
-        .map(id => shapeRefsMap.current.get(id))
+        .map(id => layer.findOne('#' + id))
         .filter(Boolean);
       tr.nodes(nodes);
     } else {
       tr.nodes([]);
     }
-    tr.getLayer()?.batchDraw();
+    layer.batchDraw();
   }, [selectedObjectIds, tool, objects]);
 
   // Space key handling for pan mode
@@ -371,19 +458,24 @@ export default function WhiteboardCanvas() {
         break;
       }
 
-      case 'arrow':
+      case 'arrow': {
+        const fromTarget = findSnapTarget(objects, pos.x, pos.y);
+        const startPt = fromTarget ? getObjectCenter(fromTarget) : { x: pos.x, y: pos.y };
         setNewObject({
           type: 'arrow',
           position: { x: 0, y: 0 },
           properties: {
-            points: [pos.x, pos.y, pos.x, pos.y],
+            points: [startPt.x, startPt.y, startPt.x, startPt.y],
             stroke: '#34495e',
             strokeWidth: 3,
             pointerLength: 10,
-            pointerWidth: 10
+            pointerWidth: 10,
+            fromId: fromTarget?.id || null,
+            toId: null,
           }
         });
         break;
+      }
     }
   }, [tool, getWorldPos, setSelectedObjects, textInputPos, isSpaceHeld, stagePos, stageScale, commitStickyNote, commitTextInput]);
 
@@ -443,15 +535,21 @@ export default function WhiteboardCanvas() {
         break;
       }
 
-      case 'arrow':
+      case 'arrow': {
+        const startPts = newObject.properties.points;
+        const fromId = newObject.properties.fromId;
+        const toTarget = findSnapTarget(objects, pos.x, pos.y, fromId ? [fromId] : []);
+        const endPt = toTarget ? getObjectCenter(toTarget) : { x: pos.x, y: pos.y };
         setNewObject({
           ...newObject,
           properties: {
             ...newObject.properties,
-            points: [startX, startY, pos.x, pos.y]
+            points: [startPts[0], startPts[1], endPt.x, endPt.y],
+            toId: toTarget?.id || null,
           }
         });
         break;
+      }
     }
   }, [isPanning, isDrawing, newObject, updateCursor, getWorldPos]);
 
@@ -520,7 +618,6 @@ export default function WhiteboardCanvas() {
     const commonProps = {
       key: obj.id || `temp-${index}`,
       id: obj.id,
-      ref: (node) => obj.id && setShapeRef(obj.id, node),
       draggable: tool === 'select' && !isPanning && !isSpaceHeld && !obj.id?.startsWith('temp'),
       onClick: () => {
         if (tool === 'select' && !isPanning) {
@@ -581,17 +678,35 @@ export default function WhiteboardCanvas() {
           />
         );
 
-      case 'arrow':
+      case 'arrow': {
+        let arrowPoints = obj.properties.points;
+        const fromObj = obj.properties.fromId ? objects.find(o => o.id === obj.properties.fromId) : null;
+        const toObj = obj.properties.toId ? objects.find(o => o.id === obj.properties.toId) : null;
+
+        if (fromObj || toObj) {
+          const rawStart = fromObj
+            ? getObjectCenter(fromObj)
+            : { x: arrowPoints[0], y: arrowPoints[1] };
+          const rawEnd = toObj
+            ? getObjectCenter(toObj)
+            : { x: arrowPoints[arrowPoints.length - 2], y: arrowPoints[arrowPoints.length - 1] };
+
+          const start = fromObj ? getEdgePoint(fromObj, rawEnd.x, rawEnd.y) : rawStart;
+          const end = toObj ? getEdgePoint(toObj, rawStart.x, rawStart.y) : rawEnd;
+          arrowPoints = [start.x, start.y, end.x, end.y];
+        }
+
         return (
           <Arrow
             {...commonProps}
-            points={obj.properties.points}
+            points={arrowPoints}
             stroke={isSelected ? '#f39c12' : obj.properties.stroke}
             strokeWidth={isSelected ? 4 : obj.properties.strokeWidth}
             pointerLength={obj.properties.pointerLength}
             pointerWidth={obj.properties.pointerWidth}
           />
         );
+      }
 
       case 'sticky_note': {
         const noteWidth = obj.properties.width || 200;
@@ -781,7 +896,7 @@ export default function WhiteboardCanvas() {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
       >
-        <Layer>
+        <Layer ref={layerRef}>
           {objects.map((obj, index) => renderObject(obj, index))}
           {newObject && renderObject(newObject, 'new')}
           {renderCursors()}
