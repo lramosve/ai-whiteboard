@@ -125,6 +125,26 @@ export const useWhiteboardStore = create((set, get) => ({
           }
         }));
       })
+      // Broadcast-based object sync (more reliable than postgres_changes alone)
+      .on('broadcast', { event: 'object_created' }, ({ payload }) => {
+        set((state) => {
+          if (state.objects.some(o => o.id === payload.object.id)) return state;
+          return { objects: [...state.objects, payload.object] };
+        });
+      })
+      .on('broadcast', { event: 'object_updated' }, ({ payload }) => {
+        set((state) => ({
+          objects: state.objects.map(o =>
+            o.id === payload.objectId ? { ...o, ...payload.updates } : o
+          )
+        }));
+      })
+      .on('broadcast', { event: 'object_deleted' }, ({ payload }) => {
+        set((state) => ({
+          objects: state.objects.filter(o => o.id !== payload.objectId),
+          selectedObjectIds: state.selectedObjectIds.filter(id => id !== payload.objectId)
+        }));
+      })
       // Presence for user tracking
       .on('presence', { event: 'sync' }, () => {
         const presenceState = channel.presenceState();
@@ -150,7 +170,9 @@ export const useWhiteboardStore = create((set, get) => ({
           // Track presence and cache user info for cursor broadcasts
           const { data: { session } } = await supabase.auth.getSession();
           const userId = session?.user?.id || `anon_${Math.random().toString(36).slice(2, 8)}`;
-          const userName = session?.user?.user_metadata?.display_name || 'Guest';
+          const meta = session?.user?.user_metadata || {};
+          const userName = meta.display_name || meta.full_name || meta.name
+            || session?.user?.email?.split('@')[0] || 'Guest';
           const colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c'];
           const color = colors[Math.floor(Math.random() * colors.length)];
           set({ connected: true, _userId: userId, _userName: userName });
@@ -196,11 +218,19 @@ export const useWhiteboardStore = create((set, get) => ({
       return;
     }
 
+    const mapped = mapObject(data);
+
     // Optimistic add (Realtime INSERT will deduplicate)
     set((state) => {
-      if (state.objects.some(o => o.id === data.id)) return state;
-      return { objects: [...state.objects, mapObject(data)] };
+      if (state.objects.some(o => o.id === mapped.id)) return state;
+      return { objects: [...state.objects, mapped] };
     });
+
+    // Broadcast to other clients for immediate sync
+    const { _channel: ch, connected: conn } = get();
+    if (ch && conn) {
+      ch.send({ type: 'broadcast', event: 'object_created', payload: { object: mapped } });
+    }
   },
 
   updateObject: async (objectId, updates) => {
@@ -223,6 +253,12 @@ export const useWhiteboardStore = create((set, get) => ({
 
     if (error) {
       console.error('Failed to update object:', error);
+    } else {
+      // Broadcast to other clients for immediate sync
+      const { _channel: ch, connected: conn } = get();
+      if (ch && conn) {
+        ch.send({ type: 'broadcast', event: 'object_updated', payload: { objectId, updates } });
+      }
     }
   },
 
@@ -240,6 +276,12 @@ export const useWhiteboardStore = create((set, get) => ({
 
     if (error) {
       console.error('Failed to delete object:', error);
+    } else {
+      // Broadcast to other clients for immediate sync
+      const { _channel: ch, connected: conn } = get();
+      if (ch && conn) {
+        ch.send({ type: 'broadcast', event: 'object_deleted', payload: { objectId } });
+      }
     }
   },
 

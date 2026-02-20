@@ -1,5 +1,5 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { Stage, Layer, Rect, Circle, Text, Arrow, Line, Group, Transformer } from 'react-konva';
+import { Stage, Layer, Rect, Circle, Text, Arrow, Line, Group, Transformer, Path } from 'react-konva';
 import { useWhiteboardStore } from '../store/whiteboardStore';
 import Minimap from './Minimap';
 
@@ -1042,27 +1042,25 @@ export default function WhiteboardCanvas() {
 
       return (
         <Group key={userId} x={cursor.x} y={cursor.y} listening={false}>
-          {/* Cursor pointer triangle */}
-          <Line
-            points={[0, 0, 4, 14, 10, 10]}
+          {/* Cursor pointer arrow (SVG path for cross-browser reliability) */}
+          <Path
+            data="M 0 0 L 0 17 L 4.5 13 L 8.5 21 L 11.5 19.5 L 7.5 11.5 L 13 11.5 Z"
             fill={color}
             stroke="#ffffff"
-            strokeWidth={1.5}
-            closed={true}
-            lineJoin="round"
+            strokeWidth={1}
           />
           {/* Name label badge */}
           <Rect
-            x={10}
-            y={12}
+            x={12}
+            y={18}
             width={labelWidth}
             height={20}
             fill={color}
             cornerRadius={4}
           />
           <Text
-            x={17}
-            y={15}
+            x={19}
+            y={21}
             text={name}
             fontSize={11}
             fontFamily="Arial"
