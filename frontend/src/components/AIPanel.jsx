@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useWhiteboardStore } from '../store/whiteboardStore';
-import { Send, Sparkles, Loader2, X, MessageSquare } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { Send, Sparkles, Loader2, X, MessageSquare, Lock } from 'lucide-react';
 
 export default function AIPanel() {
   const [isOpen, setIsOpen] = useState(false);
@@ -8,6 +9,7 @@ export default function AIPanel() {
   const messagesEndRef = useRef(null);
 
   const { aiProcessing, aiMessages, sendAICommand } = useWhiteboardStore();
+  const { isAnonymous } = useAuth();
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -135,35 +137,44 @@ export default function AIPanel() {
           </div>
 
           {/* Input */}
-          <form
-            onSubmit={handleSubmit}
-            className="p-4 border-t border-gray-200 bg-gray-50 rounded-b-lg"
-          >
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Describe what you want to create..."
-                disabled={aiProcessing}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-              />
-              <button
-                type="submit"
-                disabled={!input.trim() || aiProcessing}
-                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {aiProcessing ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Send className="w-5 h-5" />
-                )}
-              </button>
+          {isAnonymous ? (
+            <div className="p-4 border-t border-gray-200 bg-amber-50 rounded-b-lg">
+              <div className="flex items-center gap-2 text-amber-700">
+                <Lock className="w-4 h-4 flex-shrink-0" />
+                <p className="text-sm font-medium">Sign in to use AI commands</p>
+              </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">
-              Powered by Claude Sonnet 4
-            </p>
-          </form>
+          ) : (
+            <form
+              onSubmit={handleSubmit}
+              className="p-4 border-t border-gray-200 bg-gray-50 rounded-b-lg"
+            >
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Describe what you want to create..."
+                  disabled={aiProcessing}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                />
+                <button
+                  type="submit"
+                  disabled={!input.trim() || aiProcessing}
+                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {aiProcessing ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Send className="w-5 h-5" />
+                  )}
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Powered by Claude Sonnet 4
+              </p>
+            </form>
+          )}
         </div>
       )}
     </>

@@ -351,6 +351,10 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'Invalid token' });
     }
 
+    if (user.is_anonymous === true) {
+      return res.status(403).json({ error: 'AI commands require a registered account.' });
+    }
+
     const { boardId, command } = req.body;
     if (!boardId || !command) {
       return res.status(400).json({ error: 'Missing boardId or command' });

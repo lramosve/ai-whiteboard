@@ -316,6 +316,10 @@ export const useWhiteboardStore = create((set, get) => ({
         throw new Error('You must be signed in to use AI commands');
       }
 
+      if (session?.user?.is_anonymous) {
+        throw new Error('Sign in to use AI commands');
+      }
+
       const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
       const res = await fetch(`${backendUrl}/api/ai`, {
         method: 'POST',

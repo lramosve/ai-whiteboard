@@ -29,7 +29,7 @@ export default function Toolbar() {
     connected
   } = useWhiteboardStore();
 
-  const { user, logout } = useAuth();
+  const { user, logout, isAnonymous } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState('signin');
 
@@ -149,11 +149,11 @@ export default function Toolbar() {
 
           {/* Auth status */}
           <div className="flex items-center gap-2">
-            {user ? (
+            {user && !isAnonymous ? (
               <>
                 <div className="flex items-center gap-2 px-3 py-1 bg-purple-50 rounded-lg">
                   <User className="w-4 h-4 text-purple-600" />
-                  <span className="text-sm text-purple-700">{user.displayName || user.email}</span>
+                  <span className="text-sm text-purple-700">{user.user_metadata?.display_name || user.user_metadata?.full_name || user.email}</span>
                 </div>
                 <button
                   onClick={logout}
@@ -167,6 +167,12 @@ export default function Toolbar() {
               </>
             ) : (
               <>
+                {isAnonymous && (
+                  <div className="flex items-center gap-1 px-3 py-1 bg-amber-50 border border-amber-200 rounded-lg">
+                    <User className="w-4 h-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-700">Guest</span>
+                  </div>
+                )}
                 <button
                   onClick={() => handleAuthClick('signin')}
                   className="flex items-center gap-2 px-4 py-2 text-sm text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors"

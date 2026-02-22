@@ -9,11 +9,20 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const isAnonymous = user?.is_anonymous === true;
+
   useEffect(() => {
-    // Get initial session
+    // Get initial session — if none, sign in anonymously
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
+      if (session) {
+        setUser(session.user);
+        setLoading(false);
+      } else {
+        supabase.auth.signInAnonymously().then(({ error }) => {
+          if (error) console.error('Anonymous sign-in failed:', error);
+          setLoading(false);
+        });
+      }
     });
 
     // Listen for auth changes
@@ -65,6 +74,8 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+    // Re-enter guest mode so the app stays functional
+    await supabase.auth.signInAnonymously();
   };
 
   const getIdToken = async () => {
@@ -75,6 +86,7 @@ export function AuthProvider({ children }) {
   const value = {
     user,
     loading,
+    isAnonymous,
     signup,
     signin,
     signInWithGoogle,
