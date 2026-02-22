@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { Turnstile } from '@marsidev/react-turnstile';
 import { Mail, Lock, User, AlertCircle } from 'lucide-react';
+
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
 export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin' }) {
   const [mode, setMode] = useState(initialMode);
@@ -9,7 +12,9 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState(null);
   const modalRef = useRef(null);
+  const captchaRef = useRef(null);
 
   const { signin, signup, signInWithGoogle } = useAuth();
 
@@ -56,14 +61,16 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
 
     try {
       if (mode === 'signup') {
-        await signup(email, password, displayName);
+        await signup(email, password, displayName, captchaToken);
       } else {
-        await signin(email, password);
+        await signin(email, password, captchaToken);
       }
       onClose();
     } catch (err) {
       console.error('Auth error:', err);
       setError(err.message || 'Authentication failed. Please try again.');
+      captchaRef.current?.reset();
+      setCaptchaToken(null);
     } finally {
       setLoading(false);
     }
@@ -183,9 +190,18 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
             )}
           </div>
 
+          {TURNSTILE_SITE_KEY && (
+            <Turnstile
+              ref={captchaRef}
+              siteKey={TURNSTILE_SITE_KEY}
+              onSuccess={(token) => setCaptchaToken(token)}
+              onExpire={() => setCaptchaToken(null)}
+            />
+          )}
+
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || (TURNSTILE_SITE_KEY && !captchaToken)}
             className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading
@@ -233,6 +249,8 @@ export default function AuthModal({ isOpen, onClose, mode: initialMode = 'signin
             onClick={() => {
               setMode(mode === 'signup' ? 'signin' : 'signup');
               setError('');
+              captchaRef.current?.reset();
+              setCaptchaToken(null);
             }}
             className="text-purple-600 hover:text-purple-700 font-medium"
           >
